@@ -43,6 +43,7 @@ export function formatRomanianLocality(address) {
 
 /**
  * Format complete Romanian address for invoicing
+ * Special handling for Bucharest sectors, other cities remain unchanged
  * @param {Object} address - Address object from order
  * @returns {Object} - Formatted address object
  */
@@ -57,9 +58,14 @@ export function formatRomanianAddress(address) {
         };
     }
     
+    // Only apply sector formatting for Bucharest
+    const city = isBucharestAddress(address) 
+        ? formatRomanianLocality(address)
+        : (address.city || '');
+    
     return {
         street: address.address1 || '',
-        city: formatRomanianLocality(address),
+        city: city,
         state: address.province || address.province_code || '',
         zip: address.zip || '',
         country: address.country || 'România'
