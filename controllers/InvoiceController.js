@@ -146,31 +146,38 @@ class InvoiceController {
         // Base products from line items - only include items that can be fulfilled
         // Use fulfillable_quantity to handle edited orders where items were removed
         let products = order.line_items
-            .filter(item => {
-                const fulfillableQty = item.fulfillable_quantity || 0;
-                if (fulfillableQty <= 0) {
-                    console.log('🚫 Skipping removed/unfulfillable item:', {
+            .map(item => {
+                // Base on original ordered quantity
+                const baseQty = item.quantity || 0;
+
+                // Subtract refunded quantities (if any)
+                const refundedQty = (order.refunds || []).reduce((acc, refund) => {
+                    const match = (refund.refund_line_items || []).find(rli => rli?.line_item?.id === item.id);
+                    return acc + (match?.quantity || 0);
+                }, 0);
+
+                const finalQty = Math.max(0, baseQty - refundedQty);
+                if (finalQty <= 0) {
+                    console.log('🚫 Skipping item with non-positive invoice quantity (after refunds):', {
                         id: item.id,
                         title: item.title,
-                        originalQuantity: item.quantity,
-                        fulfillableQuantity: fulfillableQty
+                        orderedQuantity: baseQty,
+                        refundedQuantity: refundedQty,
+                        resultingQuantity: finalQty
                     });
-                    return false;
+                    return null;
                 }
-                return true;
-            })
-            .map(item => {
-                const fulfillableQty = item.fulfillable_quantity || item.quantity;
-                
+
                 return {
                     name: item.title,
                     code: item.sku || item.barcode,
                     price: parseFloat(item.price),
-                    quantity: fulfillableQty, // Use fulfillable quantity, not original quantity
+                    quantity: finalQty, // Use original quantity minus any refunds
                     measuringUnit: 'buc',
                     currency: order.currency,
                 };
-            });
+            })
+            .filter(Boolean);
 
         // Add shipping if exists
         if (order.shipping_lines?.length > 0) {
