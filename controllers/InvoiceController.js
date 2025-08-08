@@ -35,7 +35,7 @@ class InvoiceController {
         try {
             const order = req.body;
             console.log('✅ Processing Shopify order:', order.id);
-            console.log('Order:', order);
+            // console.log('Order:', order);
             
             // Transform and create invoice with ANAF company verification (retry logic is in OblioService)
             const invoiceData = await transformOrderWithAnafEnrichment(
@@ -47,6 +47,29 @@ class InvoiceController {
             if (!invoiceData.products || invoiceData.products.length === 0) {
                 throw new Error('No invoiceable items: all line items removed or non-invoiceable (e.g., free shipping).');
             }
+
+            // Debug: log sanitized payload to help diagnose 400s
+            console.log('🧪 Oblio invoice payload (sanitized):', {
+                cif: invoiceData.cif,
+                seriesName: invoiceData.seriesName,
+                issueDate: invoiceData.issueDate,
+                client: {
+                    name: invoiceData.client?.name,
+                    cui: invoiceData.client?.cui,
+                    regCom: invoiceData.client?.regCom,
+                    email: invoiceData.client?.email,
+                    address: invoiceData.client?.address,
+                },
+                products: invoiceData.products?.map(p => ({
+                    name: p.name,
+                    code: p.code,
+                    price: p.price,
+                    quantity: p.quantity,
+                    measuringUnit: p.measuringUnit,
+                    currency: p.currency,
+                    vatName: p.vatName
+                }))
+            });
 
             const oblioResponse = await this.oblioService.createInvoice(invoiceData);
             
@@ -175,6 +198,7 @@ class InvoiceController {
                     quantity: finalQty, // Use original quantity minus any refunds
                     measuringUnit: 'buc',
                     currency: order.currency,
+                    vatName: process.env.OBLIO_DEFAULT_VAT_NAME || 'Normala'
                 };
             })
             .filter(Boolean);
@@ -221,7 +245,9 @@ class InvoiceController {
             cif: companyCif,
             client: {
                 name: `${order.billing_address?.first_name || ''} ${order.billing_address?.last_name || ''}`.trim() || order.customer?.email,
-                address: order.billing_address ? formatRomanianAddress(order.billing_address) : null,
+                address: order.billing_address 
+                    ? formatRomanianAddress(order.billing_address) 
+                    : (order.shipping_address ? formatRomanianAddress(order.shipping_address) : 'N/A'),
                 email: order.customer?.email,
                 phone: order.billing_address?.phone
             },

@@ -75,6 +75,8 @@ export default class OblioService {
             
         } catch (error) {
             const isRetryable = this.isRetryableError(error);
+            const status = error.response?.status;
+            const respData = error.response?.data;
             
             if (isRetryable && attempt < maxRetries) {
                 const delay = baseDelay * Math.pow(2, attempt - 1);
@@ -82,7 +84,9 @@ export default class OblioService {
                 console.warn(`⚠️ Oblio API unavailable (attempt ${attempt}/${maxRetries}). Retrying in ${delay}ms...`, {
                     endpoint: config.url,
                     method: config.method,
-                    error: error.message
+                    error: error.message,
+                    status,
+                    response: respData
                 });
                 
                 await this.sleep(delay);
@@ -95,7 +99,9 @@ export default class OblioService {
                     attempt,
                     maxRetries,
                     error: error.message,
-                    retryable: isRetryable
+                    retryable: isRetryable,
+                    status,
+                    response: respData
                 });
                 
                 throw error;
