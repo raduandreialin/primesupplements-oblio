@@ -129,9 +129,15 @@ export default class ShopifyService {
             };
             
             const response = await this.graphQLQuery(mutation, variables);
-            
-            if (response.data.orderUpdate.userErrors.length > 0) {
-                throw new Error(`GraphQL errors: ${JSON.stringify(response.data.orderUpdate.userErrors)}`);
+            // shopify-api-node returns the data object directly, not wrapped in { data }
+            const orderUpdate = response.orderUpdate || response?.data?.orderUpdate;
+
+            if (!orderUpdate) {
+                throw new Error('Unexpected GraphQL response shape: missing orderUpdate');
+            }
+
+            if (Array.isArray(orderUpdate.userErrors) && orderUpdate.userErrors.length > 0) {
+                throw new Error(`GraphQL errors: ${JSON.stringify(orderUpdate.userErrors)}`);
             }
             
             console.log('✅ Order metafields updated successfully:', {
@@ -139,7 +145,7 @@ export default class ShopifyService {
                 metafields: metafields.map(m => `${m.namespace}.${m.key}`)
             });
             
-            return response.data.orderUpdate.order;
+            return orderUpdate.order;
             
         } catch (error) {
             console.error('❌ Failed to update order metafields:', {

@@ -43,6 +43,11 @@ class InvoiceController {
                 this.transformShopifyOrderToOblioInvoice.bind(this),
                 this.anafService
             );
+            // Safety: do not call Oblio if no valid products
+            if (!invoiceData.products || invoiceData.products.length === 0) {
+                throw new Error('No invoiceable items: all line items removed or non-invoiceable (e.g., free shipping).');
+            }
+
             const oblioResponse = await this.oblioService.createInvoice(invoiceData);
             
             console.log('🎉 Invoice created successfully:', {
@@ -140,7 +145,7 @@ class InvoiceController {
         
         // Base products from line items - only include items that can be fulfilled
         // Use fulfillable_quantity to handle edited orders where items were removed
-        const products = order.line_items
+        let products = order.line_items
             .filter(item => {
                 const fulfillableQty = item.fulfillable_quantity || 0;
                 if (fulfillableQty <= 0) {
@@ -169,40 +174,41 @@ class InvoiceController {
 
         // Add shipping if exists
         if (order.shipping_lines?.length > 0) {
-            products.push({
-                name: 'Transport',
-                price: parseFloat(order.shipping_lines[0].price),
-                quantity: 1,
-                measuringUnit: 'buc',
-                currency: order.currency,
+            const shippingPrice = parseFloat(order.shipping_lines[0].price);
+            if (!isNaN(shippingPrice) && shippingPrice > 0) {
+                products.push({
+                    name: 'Transport',
+                    price: shippingPrice,
+                    quantity: 1,
+                    measuringUnit: 'buc',
+                    currency: order.currency,
+                });
+            } else {
+                console.log('🚫 Skipping shipping line (free or invalid price):', {
+                    title: order.shipping_lines[0]?.title,
+                    price: order.shipping_lines[0]?.price
+                });
+            }
+        }
+
+        // Note on discounts:
+        // Oblio items should not be standalone discount-only lines without price/quantity.
+        // Applying order-level discounts requires a different payload not implemented here.
+        // To avoid 400 responses, we skip adding discount-only pseudo-lines and rely on product prices already reflecting discounts.
+        if (order.discount_applications?.length > 0) {
+            console.log('ℹ️ Detected discount applications on order. Skipping standalone discount lines to avoid invalid Oblio payload.', {
+                count: order.discount_applications.length
             });
         }
 
-        // Add discounts if they exist
-        if (order.discount_applications?.length > 0) {
-            order.discount_applications.forEach(discount => {
-                let discountName = discount.title || 'Discount';
-                let discountValue = parseFloat(discount.value);
-                let discountType = 'valoric'; // Default to fixed amount
-                
-                // Determine discount type based on Shopify discount type
-                if (discount.type === 'percentage') {
-                    discountType = 'procentual';
-                    // For percentage discounts, use the percentage value
-                    discountValue = parseFloat(discount.value);
-                } else if (discount.type === 'fixed_amount') {
-                    discountType = 'valoric';
-                    // For fixed amount, use the actual discount amount
-                    discountValue = parseFloat(discount.value);
-                }
-                
-                products.push({
-                    name: discountName,
-                    discount: discountValue,
-                    discountType: discountType
-                });
-            });
-        }
+        // Final sanitation: remove invalid/zero items (Oblio may reject them)
+        products = products.filter(p => {
+            const valid = p && typeof p.price === 'number' && !isNaN(p.price) && p.price > 0 && p.quantity > 0;
+            if (!valid) {
+                console.log('🚫 Skipping non-invoiceable product line:', p);
+            }
+            return valid;
+        });
 
         return {
             cif: companyCif,
