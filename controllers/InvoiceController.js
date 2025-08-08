@@ -55,10 +55,19 @@ class InvoiceController {
                 issueDate: invoiceData.issueDate,
                 client: {
                     name: invoiceData.client?.name,
-                    cui: invoiceData.client?.cui,
-                    regCom: invoiceData.client?.regCom,
-                    email: invoiceData.client?.email,
+                    cif: invoiceData.client?.cif,
+                    rc: invoiceData.client?.rc,
+                    code: invoiceData.client?.code,
                     address: invoiceData.client?.address,
+                    state: invoiceData.client?.state,
+                    city: invoiceData.client?.city,
+                    country: invoiceData.client?.country,
+                    iban: invoiceData.client?.iban,
+                    bank: invoiceData.client?.bank,
+                    email: invoiceData.client?.email,
+                    phone: invoiceData.client?.phone,
+                    contact: invoiceData.client?.contact,
+                    vatPayer: invoiceData.client?.vatPayer,
                 },
                 products: invoiceData.products?.map(p => ({
                     name: p.name,
@@ -216,7 +225,7 @@ class InvoiceController {
                     measuringUnit: 'buc',
                     currency: order.currency,
                     vatName: process.env.OBLIO_DEFAULT_VAT_NAME || 'Normala',
-                    management: process.env.OBLIO_MANAGEMENT
+                    management: config.oblio.OBLIO_MANAGEMENT
                 });
             } else {
                 console.log('🚫 Skipping shipping line (free or invalid price):', {
@@ -245,6 +254,12 @@ class InvoiceController {
             return valid;
         });
 
+        // Build address fields per Oblio expected format
+        const billingAddr = order.billing_address ? formatRomanianAddress(order.billing_address) : null;
+        const shippingAddr = !billingAddr && order.shipping_address ? formatRomanianAddress(order.shipping_address) : null;
+        const addr = billingAddr || shippingAddr || { street: '', city: '', state: '', zip: '', country: 'România' };
+        const singleLineAddress = [addr.street, addr.zip, addr.country].filter(Boolean).join(', ');
+
         return {
             cif: companyCif,
             client: {
@@ -252,12 +267,20 @@ class InvoiceController {
                 name: (order.billing_address?.company && (getCompanyNameFromOrder(order) || order.billing_address.company))
                     || `${order.billing_address?.first_name || ''} ${order.billing_address?.last_name || ''}`.trim()
                     || order.customer?.email,
-                // Use billing address primarily; only fallback to shipping if billing missing
-                address: order.billing_address 
-                    ? formatRomanianAddress(order.billing_address) 
-                    : (order.shipping_address ? formatRomanianAddress(order.shipping_address) : 'N/A'),
-                email: order.customer?.email,
-                phone: order.billing_address?.phone
+                // Buyer identification fields expected by Oblio
+                cif: undefined, // will be set by ANAF enrichment if CUI present
+                rc: undefined,  // will be set by ANAF enrichment if available
+                code: String(order.customer?.id || order.customer?.email || order.id),
+                address: singleLineAddress,
+                state: addr.state,
+                city: addr.city,
+                country: addr.country,
+                iban: '',
+                bank: '',
+                email: order.customer?.email || '',
+                phone: order.billing_address?.phone || order.shipping_address?.phone || '',
+                contact: `${order.billing_address?.first_name || ''} ${order.billing_address?.last_name || ''}`.trim(),
+                vatPayer: undefined // may be set by ANAF enrichment
             },
             seriesName: process.env.OBLIO_INVOICE_SERIES || 'FCT',
             issueDate: new Date().toISOString().split('T')[0],

@@ -24,11 +24,13 @@ export async function enrichClientWithAnafData(client, cui, anafService) {
         return {
             ...client,
             name: anafCompany.name || client.name,
-            cui: anafCompany.cui,
-            regCom: anafCompany.regCom,
-            rc: anafCompany.regCom, // duplicate field expected by some Oblio payloads
-            // Keep original customer address from billing info
+            // Oblio client fields
+            cif: anafCompany.cif || (anafCompany.cui ? `RO${anafCompany.cui}` : client.cif),
+            rc: anafCompany.regCom,
+            // Keep original customer address string
             address: client.address,
+            // Additional flags
+            vatPayer: typeof anafCompany.vatPayer === 'boolean' ? anafCompany.vatPayer : client.vatPayer,
             anafVerified: true,
             anafVerificationDate: anafCompany.anafVerificationDate
         };
