@@ -164,7 +164,7 @@ export default class ShopifyService {
      * @param {string} invoiceUrl - Invoice URL (must start with https://)
      * @returns {Promise<Object>} Updated order object
      */
-    async setInvoiceMetafields(orderId, invoiceNumber, invoiceUrl) {
+    async setInvoiceMetafields(orderId, invoiceNumber, invoiceUrl, invoiceSeries) {
         // Ensure URL starts with https://
         if (!invoiceUrl.startsWith('https://')) {
             invoiceUrl = `https://${invoiceUrl.replace(/^https?:\/\//, '')}`;
@@ -175,6 +175,12 @@ export default class ShopifyService {
                 namespace: 'custom',
                 key: 'invoice_number',
                 value: invoiceNumber,
+                type: 'single_line_text_field'
+            },
+            {
+                namespace: 'custom',
+                key: 'invoice_series',
+                value: invoiceSeries || '',
                 type: 'single_line_text_field'
             },
             {

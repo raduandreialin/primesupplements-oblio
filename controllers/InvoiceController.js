@@ -1,7 +1,7 @@
 import OblioService from '../services/OblioService.js';
 import ShopifyService from '../services/ShopifyService.js';
 import AnafService from '../services/AnafService.js';
-import { transformOrderWithAnafEnrichment, formatRomanianAddress } from '../utils/index.js';
+import { transformOrderWithAnafEnrichment, formatRomanianAddress, getCompanyNameFromOrder } from '../utils/index.js';
 import config from '../config/AppConfig.js';
 import dotenv from 'dotenv';
 dotenv.config();
@@ -99,7 +99,8 @@ class InvoiceController {
                 await this.shopifyService.setInvoiceMetafields(
                     order.id,
                     oblioResponse.data?.number || 'unknown',
-                    invoiceUrl
+                    invoiceUrl,
+                    oblioResponse.data?.seriesName || process.env.OBLIO_INVOICE_SERIES
                 );
                 
                 console.log('📝 Invoice metafields set successfully:', {
@@ -247,7 +248,11 @@ class InvoiceController {
         return {
             cif: companyCif,
             client: {
-                name: `${order.billing_address?.first_name || ''} ${order.billing_address?.last_name || ''}`.trim() || order.customer?.email,
+                // Prefer company name (cleaned) if present; fallback to full name/email
+                name: (order.billing_address?.company && (getCompanyNameFromOrder(order) || order.billing_address.company))
+                    || `${order.billing_address?.first_name || ''} ${order.billing_address?.last_name || ''}`.trim()
+                    || order.customer?.email,
+                // Use billing address primarily; only fallback to shipping if billing missing
                 address: order.billing_address 
                     ? formatRomanianAddress(order.billing_address) 
                     : (order.shipping_address ? formatRomanianAddress(order.shipping_address) : 'N/A'),

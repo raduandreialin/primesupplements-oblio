@@ -26,6 +26,7 @@ export async function enrichClientWithAnafData(client, cui, anafService) {
             name: anafCompany.name || client.name,
             cui: anafCompany.cui,
             regCom: anafCompany.regCom,
+            rc: anafCompany.regCom, // duplicate field expected by some Oblio payloads
             // Keep original customer address from billing info
             address: client.address,
             anafVerified: true,
