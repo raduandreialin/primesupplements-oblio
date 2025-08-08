@@ -43,44 +43,28 @@ class InvoiceController {
                 this.transformShopifyOrderToOblioInvoice.bind(this),
                 this.anafService
             );
-            // Safety: do not call Oblio if no valid products
             if (!invoiceData.products || invoiceData.products.length === 0) {
                 throw new Error('No invoiceable items: all line items removed or non-invoiceable (e.g., free shipping).');
             }
 
             // Debug: log sanitized payload to help diagnose 400s
+            // Clean payload: remove undefined/null values before sending to Oblio
+            const cleanedInvoiceData = this.sanitizeOblioPayload(invoiceData);
+            
             console.log('🧪 Oblio invoice payload (sanitized):', {
-                cif: invoiceData.cif,
-                seriesName: invoiceData.seriesName,
-                issueDate: invoiceData.issueDate,
-                client: {
-                    name: invoiceData.client?.name,
-                    cif: invoiceData.client?.cif,
-                    rc: invoiceData.client?.rc,
-                    code: invoiceData.client?.code,
-                    address: invoiceData.client?.address,
-                    state: invoiceData.client?.state,
-                    city: invoiceData.client?.city,
-                    country: invoiceData.client?.country,
-                    iban: invoiceData.client?.iban,
-                    bank: invoiceData.client?.bank,
-                    email: invoiceData.client?.email,
-                    phone: invoiceData.client?.phone,
-                    contact: invoiceData.client?.contact,
-                    vatPayer: invoiceData.client?.vatPayer,
-                },
-                products: invoiceData.products?.map(p => ({
+                cif: cleanedInvoiceData.cif,
+                seriesName: cleanedInvoiceData.seriesName,
+                issueDate: cleanedInvoiceData.issueDate,
+                client: cleanedInvoiceData.client,
+                products: cleanedInvoiceData.products?.map(p => ({
                     name: p.name,
-                    code: p.code,
-                    price: p.price,
                     quantity: p.quantity,
-                    measuringUnit: p.measuringUnit,
-                    currency: p.currency,
-                    vatName: p.vatName
+                    price: p.price,
+                    management: p.management
                 }))
             });
 
-            const oblioResponse = await this.oblioService.createInvoice(invoiceData);
+            const oblioResponse = await this.oblioService.createInvoice(cleanedInvoiceData);
             
             console.log('🎉 Invoice created successfully:', {
                 orderId: order.id,
@@ -260,33 +244,56 @@ class InvoiceController {
         const addr = billingAddr || shippingAddr || { street: '', city: '', state: '', zip: '', country: 'România' };
         const singleLineAddress = [addr.street, addr.zip, addr.country].filter(Boolean).join(', ');
 
+        // Build client object (cif/rc will be added by ANAF enrichment if company order)
+        const client = {
+            name: (order.billing_address?.company && (getCompanyNameFromOrder(order) || order.billing_address.company))
+                || `${order.billing_address?.first_name || ''} ${order.billing_address?.last_name || ''}`.trim()
+                || order.customer?.email,
+            code: String(order.customer?.id || order.customer?.email || order.id),
+            address: singleLineAddress,
+            state: addr.state,
+            city: addr.city,
+            country: addr.country,
+            iban: '',
+            bank: '',
+            email: order.customer?.email || '',
+            phone: order.billing_address?.phone || order.shipping_address?.phone || '',
+            contact: `${order.billing_address?.first_name || ''} ${order.billing_address?.last_name || ''}`.trim()
+        };
+
         return {
             cif: companyCif,
-            client: {
-                // Prefer company name (cleaned) if present; fallback to full name/email
-                name: (order.billing_address?.company && (getCompanyNameFromOrder(order) || order.billing_address.company))
-                    || `${order.billing_address?.first_name || ''} ${order.billing_address?.last_name || ''}`.trim()
-                    || order.customer?.email,
-                // Buyer identification fields expected by Oblio
-                cif: undefined, // will be set by ANAF enrichment if CUI present
-                rc: undefined,  // will be set by ANAF enrichment if available
-                code: String(order.customer?.id || order.customer?.email || order.id),
-                address: singleLineAddress,
-                state: addr.state,
-                city: addr.city,
-                country: addr.country,
-                iban: '',
-                bank: '',
-                email: order.customer?.email || '',
-                phone: order.billing_address?.phone || order.shipping_address?.phone || '',
-                contact: `${order.billing_address?.first_name || ''} ${order.billing_address?.last_name || ''}`.trim(),
-                vatPayer: undefined // may be set by ANAF enrichment
-            },
+            client,
             seriesName: process.env.OBLIO_INVOICE_SERIES || 'FCT',
             issueDate: new Date().toISOString().split('T')[0],
             language: 'RO',
             products
         };
+    }
+
+    /**
+     * Remove undefined/null values from Oblio payload to avoid API errors
+     * @param {Object} payload - Invoice payload
+     * @returns {Object} - Cleaned payload
+     */
+    sanitizeOblioPayload(payload) {
+        const sanitize = (obj) => {
+            if (Array.isArray(obj)) {
+                return obj.map(sanitize);
+            }
+            if (obj && typeof obj === 'object') {
+                const cleaned = {};
+                for (const [key, value] of Object.entries(obj)) {
+                    if (value !== undefined && value !== null) {
+                        cleaned[key] = sanitize(value);
+                    }
+                }
+                return cleaned;
+            }
+            return obj;
+        };
+        
+        return sanitize(payload);
     }
 }
 
