@@ -35,6 +35,7 @@ class InvoiceController {
         try {
             const order = req.body;
             console.log('✅ Processing Shopify order:', order.id);
+            console.log('Order:', order);
             
             // Transform and create invoice with ANAF company verification (retry logic is in OblioService)
             const invoiceData = await transformOrderWithAnafEnrichment(
