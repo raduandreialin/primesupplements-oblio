@@ -14,6 +14,7 @@ const config = {
         OBLIO_API_TOKEN: process.env.OBLIO_API_TOKEN,
         OBLIO_COMPANY_CIF: process.env.OBLIO_COMPANY_CIF,
         OBLIO_INVOICE_SERIES: process.env.OBLIO_INVOICE_SERIES,
+        OBLIO_MANAGEMENT: process.env.OBLIO_MANAGEMENT,
     }
 };
 

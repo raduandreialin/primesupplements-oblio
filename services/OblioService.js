@@ -154,6 +154,12 @@ export default class OblioService {
         return this.request('GET', '/nomenclature/series', { cif });
     }
     
+    // Management (Gestiuni)
+    async getManagements(cif) {
+        // If the endpoint differs in your account, the error logger will show details
+        return this.request('GET', '/nomenclature/management', { cif });
+    }
+
     // Document methods
     async createProforma(data) {
         return this.request('POST', '/docs/proforma', data);

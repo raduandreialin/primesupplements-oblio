@@ -139,14 +139,15 @@ class InvoiceController {
                 });
                 
                 // Set error metafield
-                await this.shopifyService.setErrorMetafield(
-                    orderId,
-                    `Facturare esuata: ${error.message}. Timestamp: ${new Date().toISOString()}`
-                );
+                const httpStatus = error.response?.status;
+                const statusMessage = error.response?.data?.statusMessage || error.response?.data?.message;
+                const composedMsg = `Facturare esuata: ${error.message}${httpStatus ? ` (HTTP ${httpStatus})` : ''}${statusMessage ? ` | ${statusMessage}` : ''}. Timestamp: ${new Date().toISOString()}`;
+
+                await this.shopifyService.setErrorMetafield(orderId, composedMsg);
                 
                 console.log('📝 Error metafield set successfully:', {
                     orderId,
-                    errorMessage: error.message
+                    errorMessage: composedMsg
                 });
                 
             } catch (shopifyError) {
@@ -193,12 +194,12 @@ class InvoiceController {
 
                 return {
                     name: item.title,
-                    code: item.sku || item.barcode,
+                    code: item.sku || item.barcode || String(item.id),
                     price: parseFloat(item.price),
                     quantity: finalQty, // Use original quantity minus any refunds
                     measuringUnit: 'buc',
                     currency: order.currency,
-                    vatName: process.env.OBLIO_DEFAULT_VAT_NAME || 'Normala'
+                    management: config.oblio.OBLIO_MANAGEMENT
                 };
             })
             .filter(Boolean);
@@ -213,6 +214,8 @@ class InvoiceController {
                     quantity: 1,
                     measuringUnit: 'buc',
                     currency: order.currency,
+                    vatName: process.env.OBLIO_DEFAULT_VAT_NAME || 'Normala',
+                    management: process.env.OBLIO_MANAGEMENT
                 });
             } else {
                 console.log('🚫 Skipping shipping line (free or invalid price):', {
