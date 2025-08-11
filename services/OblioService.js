@@ -1,5 +1,6 @@
 import axios from "axios";
 import config from "../config/AppConfig.js";
+import { logger } from "../utils/index.js";
 
 export default class OblioService {
     constructor() {
@@ -81,19 +82,22 @@ export default class OblioService {
             if (isRetryable && attempt < maxRetries) {
                 const delay = baseDelay * Math.pow(2, attempt - 1);
                 
-                console.warn(`⚠️ Oblio API unavailable (attempt ${attempt}/${maxRetries}). Retrying in ${delay}ms...`, {
+                logger.warn({
                     endpoint: config.url,
                     method: config.method,
                     error: error.message,
                     status,
-                    response: respData
-                });
+                    response: respData,
+                    attempt,
+                    maxRetries,
+                    delay
+                }, 'Oblio API unavailable. Retrying');
                 
                 await this.sleep(delay);
                 return this.requestWithRetry(config, maxRetries, attempt + 1);
                 
             } else {
-                console.error('❌ Oblio API request failed permanently:', {
+                logger.error({
                     endpoint: config.url,
                     method: config.method,
                     attempt,
@@ -102,7 +106,7 @@ export default class OblioService {
                     retryable: isRetryable,
                     status,
                     response: respData
-                });
+                }, 'Oblio API request failed permanently');
                 
                 throw error;
             }

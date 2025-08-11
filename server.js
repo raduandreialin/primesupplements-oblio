@@ -1,8 +1,18 @@
 import express from "express";
+import pinoHttp from 'pino-http';
+import { logger } from './utils/index.js';
 import webhookRoutes from "./routes/webhooks.js";
 import { captureRawBody } from "./middlewares/verifyShopifyWebhook.js";
 
 const app = express();
+
+// Request logging
+app.use(pinoHttp({
+  logger,
+  redact: {
+    paths: ['req.headers.authorization']
+  }
+}));
 
 // Capture raw body for webhook verification (before JSON parsing)
 app.use('/webhooks/shopify', express.raw({ type: 'application/json', verify: captureRawBody }));
@@ -21,6 +31,6 @@ app.get('/', (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
-    console.log(`🚀 Server started on port ${PORT}`);
-    console.log(`📋 Webhook endpoint: http://localhost:${PORT}/webhooks/shopify/invoice/create`);
+    logger.info({ port: PORT }, 'Server started');
+    logger.info({ endpoint: `/webhooks/shopify/invoice/create` }, 'Webhook endpoint available');
 });

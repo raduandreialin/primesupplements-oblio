@@ -1,7 +1,7 @@
 import OblioService from '../services/OblioService.js';
 import ShopifyService from '../services/ShopifyService.js';
 import AnafService from '../services/AnafService.js';
-import { transformOrderWithAnafEnrichment, formatRomanianAddress, getCompanyNameFromOrder } from '../utils/index.js';
+import { transformOrderWithAnafEnrichment, formatRomanianAddress, getCompanyNameFromOrder, logger } from '../utils/index.js';
 import config from '../config/AppConfig.js';
 import dotenv from 'dotenv';
 dotenv.config();
@@ -34,7 +34,7 @@ class InvoiceController {
         
         try {
             const order = req.body;
-            console.log('✅ Processing Shopify order:', order.id);
+            logger.info({ orderId: order.id }, 'Processing Shopify order');
             // console.log('Order:', order);
             
             // Transform and create invoice with ANAF company verification (retry logic is in OblioService)
@@ -51,7 +51,7 @@ class InvoiceController {
             // Clean payload: remove undefined/null values before sending to Oblio
             const cleanedInvoiceData = this.sanitizeOblioPayload(invoiceData);
             
-            console.log('🧪 Oblio invoice payload (sanitized):', {
+            logger.debug({
                 cif: cleanedInvoiceData.cif,
                 seriesName: cleanedInvoiceData.seriesName,
                 issueDate: cleanedInvoiceData.issueDate,
@@ -62,15 +62,15 @@ class InvoiceController {
                     price: p.price,
                     management: p.management
                 }))
-            });
+            }, 'Oblio invoice payload (sanitized)');
 
             const oblioResponse = await this.oblioService.createInvoice(cleanedInvoiceData);
             
-            console.log('🎉 Invoice created successfully:', {
+            logger.info({
                 orderId: order.id,
                 invoiceNumber: oblioResponse.data?.number,
                 customer: order.customer?.email
-            });
+            }, 'Invoice created successfully');
             
             // Tag the order and set metafields in Shopify
             try {
@@ -80,10 +80,10 @@ class InvoiceController {
                     `FACTURA-${oblioResponse.data?.number || 'unknown'}`
                 ]);
                 
-                console.log('🏷️ Order tagged successfully:', {
+                logger.info({
                     orderId: order.id,
                     tags: ['oblio-invoiced', `FACTURA-${oblioResponse.data?.number || 'unknown'}`]
-                });
+                }, 'Order tagged successfully');
                 
                 // Set invoice metafields
                 // Use the actual URL from Oblio response, or construct from response data
@@ -96,28 +96,28 @@ class InvoiceController {
                     oblioResponse.data?.seriesName || process.env.OBLIO_INVOICE_SERIES
                 );
                 
-                console.log('📝 Invoice metafields set successfully:', {
+                logger.info({
                     orderId: order.id,
                     invoiceNumber: oblioResponse.data?.number,
                     invoiceUrl
-                });
+                }, 'Invoice metafields set successfully');
                 
             } catch (shopifyError) {
                 // Don't fail the whole process if Shopify updates fail
-                console.warn('⚠️ Failed to update Shopify order (invoice still created):', {
+                logger.warn({
                     orderId: order.id,
                     error: shopifyError.message
-                });
+                }, 'Failed to update Shopify order (invoice still created)');
             }
             
         } catch (error) {
             const orderId = req.body?.id || 'unknown';
             
             // Log final failure (after all retries in service layer)
-            console.error('❌ Invoice creation failed permanently:', {
+            logger.error({
                 orderId,
                 error: error.message
-            });
+            }, 'Invoice creation failed permanently');
             
             // Tag the order and set error metafield
             try {
@@ -127,10 +127,10 @@ class InvoiceController {
                     `error-${new Date().toISOString().split('T')[0]}` // error-2025-01-07
                 ]);
                 
-                console.log('🏷️ Order tagged with error status:', {
+                logger.info({
                     orderId,
                     tags: ['EROARE FACTURARE', `error-${new Date().toISOString().split('T')[0]}`]
-                });
+                }, 'Order tagged with error status');
                 
                 // Set error metafield
                 const httpStatus = error.response?.status;
@@ -139,17 +139,17 @@ class InvoiceController {
 
                 await this.shopifyService.setErrorMetafield(orderId, composedMsg);
                 
-                console.log('📝 Error metafield set successfully:', {
+                logger.info({
                     orderId,
                     errorMessage: composedMsg
-                });
+                }, 'Error metafield set successfully');
                 
             } catch (shopifyError) {
-                console.warn('⚠️ Failed to update Shopify order with error status:', {
+                logger.warn({
                     orderId,
                     shopifyError: shopifyError.message,
                     originalError: error.message
-                });
+                }, 'Failed to update Shopify order with error status');
             }
         }
     }
@@ -176,13 +176,13 @@ class InvoiceController {
 
                 const finalQty = Math.max(0, baseQty - refundedQty);
                 if (finalQty <= 0) {
-                    console.log('🚫 Skipping item with non-positive invoice quantity (after refunds):', {
+                    logger.debug({
                         id: item.id,
                         title: item.title,
                         orderedQuantity: baseQty,
                         refundedQuantity: refundedQty,
                         resultingQuantity: finalQty
-                    });
+                    }, 'Skipping item with non-positive invoice quantity (after refunds)');
                     return null;
                 }
 
@@ -212,10 +212,10 @@ class InvoiceController {
                     management: config.oblio.OBLIO_MANAGEMENT
                 });
             } else {
-                console.log('🚫 Skipping shipping line (free or invalid price):', {
+                logger.debug({
                     title: order.shipping_lines[0]?.title,
                     price: order.shipping_lines[0]?.price
-                });
+                }, 'Skipping shipping line (free or invalid price)');
             }
         }
 
@@ -224,16 +224,16 @@ class InvoiceController {
         // Applying order-level discounts requires a different payload not implemented here.
         // To avoid 400 responses, we skip adding discount-only pseudo-lines and rely on product prices already reflecting discounts.
         if (order.discount_applications?.length > 0) {
-            console.log('ℹ️ Detected discount applications on order. Skipping standalone discount lines to avoid invalid Oblio payload.', {
+            logger.debug({
                 count: order.discount_applications.length
-            });
+            }, 'Detected discount applications on order; skipping standalone discount lines');
         }
 
         // Final sanitation: remove invalid/zero items (Oblio may reject them)
         products = products.filter(p => {
             const valid = p && typeof p.price === 'number' && !isNaN(p.price) && p.price > 0 && p.quantity > 0;
             if (!valid) {
-                console.log('🚫 Skipping non-invoiceable product line:', p);
+                logger.debug({ product: p }, 'Skipping non-invoiceable product line');
             }
             return valid;
         });

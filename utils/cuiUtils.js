@@ -1,3 +1,4 @@
+import logger from './logger.js';
 /**
  * CUI (Romanian Company Identifier) utility functions
  * Handles extraction and validation of Romanian company identifiers
@@ -19,12 +20,12 @@ export function extractCUIFromOrder(order) {
                 // Basic validation - ensure it's a valid number
                 const cui = parseInt(cuiMatch[1], 10);
                 if (isNaN(cui) || cui <= 0) {
-                    console.log(`⚠️ Invalid CUI format in company field: ${cuiMatch[1]}`);
+                    logger.warn({ cui: cuiMatch[1] }, 'Invalid CUI format in company field');
                     return null;
                 }
                 return cui;
             } catch (error) {
-                console.log(`⚠️ Invalid CUI found in company field: ${cuiMatch[1]}`);
+                logger.warn({ cui: cuiMatch[1] }, 'Invalid CUI found in company field');
                 return null;
             }
         }

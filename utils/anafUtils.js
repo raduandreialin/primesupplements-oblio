@@ -1,3 +1,5 @@
+import logger from './logger.js';
+import { extractCUIFromOrder } from './cuiUtils.js';
 /**
  * ANAF integration utility functions
  * Handles company data enrichment with ANAF verification
@@ -15,7 +17,7 @@
  */
 export async function enrichClientWithAnafData(client, cui, anafService) {
     try {
-        console.log(`🔍 Enriching client data with ANAF verification for CUI: ${cui}`);
+        logger.info({ cui }, 'Enriching client data with ANAF verification');
         
         const anafCompany = await anafService.getCompanyForOblio(cui);
         
@@ -36,7 +38,7 @@ export async function enrichClientWithAnafData(client, cui, anafService) {
         };
         
     } catch (error) {
-        console.warn(`⚠️ ANAF enrichment failed for CUI ${cui}:`, error.message);
+        logger.warn({ cui, error: error.message }, 'ANAF enrichment failed');
         
         // Return original client data with CUI if verification fails
         return {
@@ -60,11 +62,10 @@ export async function transformOrderWithAnafEnrichment(order, basicTransform, an
     const basicInvoiceData = basicTransform(order);
     
     // Try to extract CUI from order
-    const { extractCUIFromOrder } = await import('./cuiUtils.js');
     const cui = extractCUIFromOrder(order);
     
     if (cui) {
-        console.log(`🏢 Company CUI detected in order ${order.id}: ${cui}`);
+        logger.info({ orderId: order.id, cui }, 'Company CUI detected in order');
         
         // Enrich client data with ANAF information
         basicInvoiceData.client = await enrichClientWithAnafData(
@@ -73,9 +74,9 @@ export async function transformOrderWithAnafEnrichment(order, basicTransform, an
             anafService
         );
         
-        console.log(`✅ Client data enriched with ANAF verification for ${basicInvoiceData.client.name}`);
+        logger.info({ name: basicInvoiceData.client.name }, 'Client data enriched with ANAF verification');
     } else {
-        console.log(`👤 No company CUI found in order ${order.id}, treating as individual customer`);
+        logger.info({ orderId: order.id }, 'No company CUI found in order, treating as individual customer');
     }
     
     return basicInvoiceData;

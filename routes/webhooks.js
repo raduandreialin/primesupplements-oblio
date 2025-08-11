@@ -1,6 +1,7 @@
 import express from 'express';
 import InvoiceController from '../controllers/InvoiceController.js';
 import verifyShopifyWebhook from '../middlewares/verifyShopifyWebhook.js';
+import { logger } from '../utils/index.js';
 
 const router = express.Router();
 

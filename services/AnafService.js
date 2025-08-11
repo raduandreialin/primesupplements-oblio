@@ -1,4 +1,5 @@
 import axios from "axios";
+import { logger } from "../utils/index.js";
 
 /**
  * ANAF (Romanian National Agency for Fiscal Administration) Service
@@ -35,7 +36,7 @@ export default class AnafService {
         
         if (timeSinceLastRequest < this.minRequestInterval) {
             const waitTime = this.minRequestInterval - timeSinceLastRequest;
-            console.log(`⏳ ANAF rate limiting: waiting ${waitTime}ms`);
+            logger.warn({ waitTime }, 'ANAF rate limiting: waiting');
             await this.sleep(waitTime);
         }
         
@@ -150,7 +151,7 @@ export default class AnafService {
         try {
             await this.enforceRateLimit();
             
-            console.log(`🔍 Verifying ${normalizedCuis.length} companies with ANAF for date ${formattedDate}`);
+            logger.info({ count: normalizedCuis.length, date: formattedDate }, 'Verifying companies with ANAF');
             
             const response = await this.api.post('/tva', payload);
             
@@ -169,7 +170,7 @@ export default class AnafService {
             const found = response.data.found || [];
             const notFound = response.data.notFound || [];
             
-            console.log(`✅ ANAF verification completed: ${found.length} found, ${notFound.length} not found`);
+            logger.info({ found: found.length, notFound: notFound.length }, 'ANAF verification completed');
             
             return {
                 status: response.data.cod || 200,
@@ -179,21 +180,21 @@ export default class AnafService {
             };
 
         } catch (error) {
-            console.error('❌ ANAF verification failed:', {
+            logger.error({
                 cuis: normalizedCuis,
                 date: formattedDate,
                 error: error.message,
                 errorType: error.constructor.name
-            });
+            }, 'ANAF verification failed');
             
             if (error.response) {
-                console.error(`📥 ANAF API error (${error.response.status}):`, error.response.data?.message || error.response.statusText);
+                logger.error({ status: error.response.status, message: error.response.data?.message || error.response.statusText }, 'ANAF API error');
                 throw new Error(`ANAF API error (${error.response.status}): ${error.response.data?.message || error.response.statusText || error.message}`);
             } else if (error.request) {
-                console.error(`📤 ANAF API not responding:`, error.code || 'NETWORK_ERROR');
+                logger.error({ code: error.code || 'NETWORK_ERROR' }, 'ANAF API not responding');
                 throw new Error(`ANAF API is not responding (${error.code || 'NETWORK_ERROR'}). Please try again later.`);
             } else {
-                console.error('⚙️ ANAF service error:', error.message);
+                logger.error({ message: error.message }, 'ANAF service error');
                 throw error;
             }
         }
@@ -300,7 +301,7 @@ export default class AnafService {
             const info = this.extractCompanyInfo(company);
             return info.vatPayer && !info.inactive;
         } catch (error) {
-            console.warn(`⚠️ Could not verify VAT status for CUI ${cui}:`, error.message);
+            logger.warn({ cui, error: error.message }, 'Could not verify VAT status for CUI');
             return false;
         }
     }
@@ -339,7 +340,7 @@ export default class AnafService {
                 anafVerificationDate: this.formatDate(date)
             };
         } catch (error) {
-            console.error(`❌ Failed to get company details for CUI ${cui}:`, error.message);
+            logger.error({ cui, error: error.message }, 'Failed to get company details for CUI');
             throw error;
         }
     }

@@ -1,5 +1,6 @@
 import Shopify from "shopify-api-node";
 import config from "../config/AppConfig.js";
+import { logger } from "../utils/index.js";
 
 export default class ShopifyService {
     constructor(shopName, accessToken) {
@@ -51,20 +52,12 @@ export default class ShopifyService {
                 tags: allTags
             });
             
-            console.log('✅ Order tagged successfully:', {
-                orderId,
-                newTags: tagsString,
-                allTags: updatedOrder.tags
-            });
+            logger.info({ orderId, newTags: tagsString, allTags: updatedOrder.tags }, 'Order tagged successfully');
             
             return updatedOrder;
             
         } catch (error) {
-            console.error('❌ Failed to tag order:', {
-                orderId,
-                tags,
-                error: error.message
-            });
+            logger.error({ orderId, tags, error: error.message }, 'Failed to tag order');
             throw error;
         }
     }
@@ -78,10 +71,7 @@ export default class ShopifyService {
         try {
             return await this.shopify.order.get(orderId);
         } catch (error) {
-            console.error('❌ Failed to get order:', {
-                orderId,
-                error: error.message
-            });
+            logger.error({ orderId, error: error.message }, 'Failed to get order');
             throw error;
         }
     }
@@ -140,19 +130,12 @@ export default class ShopifyService {
                 throw new Error(`GraphQL errors: ${JSON.stringify(orderUpdate.userErrors)}`);
             }
             
-            console.log('✅ Order metafields updated successfully:', {
-                orderId,
-                metafields: metafields.map(m => `${m.namespace}.${m.key}`)
-            });
+            logger.info({ orderId, metafields: metafields.map(m => `${m.namespace}.${m.key}`) }, 'Order metafields updated successfully');
             
             return orderUpdate.order;
             
         } catch (error) {
-            console.error('❌ Failed to update order metafields:', {
-                orderId,
-                metafields,
-                error: error.message
-            });
+            logger.error({ orderId, metafields, error: error.message }, 'Failed to update order metafields');
             throw error;
         }
     }

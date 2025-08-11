@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { logger } from '../utils/index.js';
 
 // Middleware to capture raw body
 export const captureRawBody = (req, res, buf) => {
@@ -12,13 +13,13 @@ const verifyShopifyWebhook = (req, res, next) => {
 
   // Check if HMAC is provided in the headers
   if (!hmac) {
-    console.error("Missing HMAC in request headers!");
+    logger.error({ headers: req.headers }, "Missing HMAC in request headers");
     return res.status(401).json({ error: "Unauthorized: Missing HMAC" });
   }
 
   // Check if shop domain is provided
   if (!shopDomain) {
-    console.error("Missing shop domain in request headers!");
+    logger.error({ headers: req.headers }, "Missing shop domain in request headers");
     return res.status(401).json({ error: "Unauthorized: Missing shop domain" });
   }
 
@@ -26,13 +27,13 @@ const verifyShopifyWebhook = (req, res, next) => {
   const apiSecret = getShopSecret(shopDomain);
 
   if (!apiSecret) {
-    console.error(`Shop domain not recognized: ${shopDomain}`);
+    logger.error({ shopDomain }, 'Shop domain not recognized');
     return res.status(401).json({ error: "Unauthorized: Shop domain not recognized" });
   }
 
   // Ensure rawBody is available
   if (!req.rawBody) {
-    console.error("Raw body not available for verification!");
+    logger.error({ shopDomain }, "Raw body not available for verification");
     return res.status(400).json({ error: "Bad Request: Raw body not available" });
   }
 
@@ -47,7 +48,7 @@ const verifyShopifyWebhook = (req, res, next) => {
 
   if (expectedBuffer.length !== actualBuffer.length || 
       !crypto.timingSafeEqual(expectedBuffer, actualBuffer)) {
-    console.warn(`Webhook verification failed for shop: ${shopDomain}`);
+    logger.warn({ shopDomain }, 'Webhook verification failed');
     return res.status(401).json({ error: "Unauthorized: Webhook verification failed" });
   }
 
@@ -55,11 +56,11 @@ const verifyShopifyWebhook = (req, res, next) => {
   try {
     req.body = JSON.parse(req.rawBody.toString());
   } catch (error) {
-    console.error("Invalid JSON payload:", error.message);
+    logger.error({ error: error.message }, "Invalid JSON payload");
     return res.status(400).json({ error: "Bad Request: Invalid JSON payload" });
   }
 
-  console.log(`Webhook verified successfully for shop: ${shopDomain}`);
+  logger.info({ shopDomain }, 'Webhook verified successfully');
   next();
 };
 

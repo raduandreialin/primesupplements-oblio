@@ -25,3 +25,6 @@ export {
     getBucharestSectors,
     isValidBucharestSector
 } from './addressUtils.js';
+
+// Logger
+export { default as logger } from './logger.js';
