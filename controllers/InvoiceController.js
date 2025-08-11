@@ -261,12 +261,32 @@ class InvoiceController {
             contact: `${order.billing_address?.first_name || ''} ${order.billing_address?.last_name || ''}`.trim()
         };
 
+        // Determine if the order is fully paid in Shopify to mark the invoice as collected
+        const isPaid = (order.financial_status || '').toLowerCase() === 'paid';
+
+        // Prefer the date when the order was processed/paid; fallback to today
+        const collectDateIso = (order.processed_at || order.closed_at || order.updated_at || new Date().toISOString());
+        const collectDate = collectDateIso.split('T')[0];
+
+        // Build collect object only for fully paid orders. Value is optional (defaults to invoice total in Oblio)
+        const collect = isPaid
+            ? {
+                  type: 'Ordin de plata',
+                  documentNumber: String(order.order_number || order.name || order.id)
+              }
+            : undefined;
+
         return {
             cif: companyCif,
             client,
             seriesName: process.env.OBLIO_INVOICE_SERIES || 'FCT',
             issueDate: new Date().toISOString().split('T')[0],
             language: 'RO',
+            mentions: `Factura emisa pentru comanda ${order.name}`,
+            sendEmail: 1,
+            useStock: 1,
+            collectDate: isPaid ? collectDate : undefined,
+            collect,
             products
         };
     }
