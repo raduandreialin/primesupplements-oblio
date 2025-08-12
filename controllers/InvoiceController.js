@@ -35,8 +35,13 @@ class InvoiceController {
         try {
             const order = req.body;
             logger.info({ orderId: order.id }, 'Processing Shopify order');
-            // Log only discount applications as requested
-            logger.info({ orderId: order.id, discount_applications: order.discount_applications }, 'Shopify discount_applications');
+            // Log discount information
+            logger.info({ 
+                orderId: order.id, 
+                current_total_discounts: order.current_total_discounts,
+                total_discounts: order.total_discounts,
+                discount_applications: order.discount_applications 
+            }, 'Shopify discount info');
             // Transform and create invoice with ANAF company verification (retry logic is in OblioService)
             const invoiceData = await transformOrderWithAnafEnrichment(
                 order,
@@ -150,52 +155,65 @@ class InvoiceController {
     transformShopifyOrderToOblioInvoice(order) {
         const companyCif = process.env.OBLIO_COMPANY_CIF;
         
-        // Calculate total order value before discounts to distribute discounts proportionally
+        const totalDiscounts = parseFloat(order.current_total_discounts || 0);
+        
+        // Calculate total order value to distribute discounts proportionally
         const totalOrderValue = order.line_items.reduce((sum, item) => {
             const qty = item.quantity || 0;
             const price = parseFloat(item.price) || 0;
             return sum + (qty * price);
         }, 0);
 
-        const totalDiscounts = parseFloat(order.current_total_discounts || 0);
+        // Base products from line items - use original prices and add individual discount lines
+        let products = [];
+        
+        order.line_items.forEach(item => {
+            // Base on original ordered quantity
+            const baseQty = item.quantity || 0;
 
-        // Base products from line items - apply proportional discount to each item
-        let products = order.line_items
-            .map(item => {
-                // Base on original ordered quantity
-                const baseQty = item.quantity || 0;
+            // Subtract refunded quantities (if any)
+            const refundedQty = (order.refunds || []).reduce((acc, refund) => {
+                const match = (refund.refund_line_items || []).find(rli => rli?.line_item?.id === item.id);
+                return acc + (match?.quantity || 0);
+            }, 0);
 
-                // Subtract refunded quantities (if any)
-                const refundedQty = (order.refunds || []).reduce((acc, refund) => {
-                    const match = (refund.refund_line_items || []).find(rli => rli?.line_item?.id === item.id);
-                    return acc + (match?.quantity || 0);
-                }, 0);
+            const finalQty = Math.max(0, baseQty - refundedQty);
+            if (finalQty <= 0) {
+                return;
+            }
 
-                const finalQty = Math.max(0, baseQty - refundedQty);
-                if (finalQty <= 0) {
-                    return null;
-                }
+            // Use original unit price
+            const unitPrice = parseFloat(item.price);
 
-                // Apply proportional discount to unit price
-                const unitPrice = parseFloat(item.price);
+            // Add the product line
+            products.push({
+                name: item.title,
+                code: item.sku || item.barcode || String(item.id),
+                price: unitPrice,
+                quantity: finalQty,
+                measuringUnit: 'buc',
+                currency: order.currency,
+                management: config.oblio.OBLIO_MANAGEMENT
+            });
+
+            // Calculate proportional discount for this item
+            if (totalDiscounts > 0 && totalOrderValue > 0) {
                 const lineTotal = baseQty * unitPrice;
-                const proportionalDiscount = totalOrderValue > 0 && totalDiscounts > 0 
-                    ? (lineTotal / totalOrderValue) * totalDiscounts 
-                    : 0;
-                const discountPerUnit = baseQty > 0 ? proportionalDiscount / baseQty : 0;
-                const effectiveUnitPrice = Math.max(0, unitPrice - discountPerUnit);
-
-                return {
-                    name: item.title,
-                    code: item.sku || item.barcode || String(item.id),
-                    price: parseFloat(effectiveUnitPrice.toFixed(2)),
-                    quantity: finalQty,
-                    measuringUnit: 'buc',
-                    currency: order.currency,
-                    management: config.oblio.OBLIO_MANAGEMENT
-                };
-            })
-            .filter(Boolean);
+                const itemDiscount = (lineTotal / totalOrderValue) * totalDiscounts;
+                
+                if (itemDiscount > 0) {
+                    // Add individual discount line for this product
+                    products.push({
+                        name: `Discount ${item.title}`,
+                        price: -parseFloat(itemDiscount.toFixed(2)),
+                        quantity: 1,
+                        measuringUnit: 'buc',
+                        currency: order.currency,
+                        management: config.oblio.OBLIO_MANAGEMENT
+                    });
+                }
+            }
+        });
 
         // Add shipping if exists
         if (order.shipping_lines?.length > 0) {
@@ -208,18 +226,19 @@ class InvoiceController {
                     quantity: 1,
                     measuringUnit: 'buc',
                     currency: order.currency,
-                    vatName: process.env.OBLIO_DEFAULT_VAT_NAME || 'Normala',
                     management: config.oblio.OBLIO_MANAGEMENT
                 });
             }
         }
 
         // Note on discounts:
-        // We apply Shopify discounts proportionally to each product's unit price to avoid Oblio's VAT rate restriction.
+        // We add individual discount lines per product as negative price items, matching the pattern from old invoices.
+        // Each discount line is proportional to the product's share of total order value.
 
         // Final sanitation: remove invalid/zero items (Oblio may reject them)
+        // Allow negative prices for discount lines
         products = products.filter(p => {
-            const validProduct = p && typeof p.price === 'number' && !isNaN(p.price) && p.price >= 0 && p.quantity > 0;
+            const validProduct = p && typeof p.price === 'number' && !isNaN(p.price) && p.quantity > 0;
             if (!validProduct) {
                 // intentionally silent per request to minimize debug logs
             }
