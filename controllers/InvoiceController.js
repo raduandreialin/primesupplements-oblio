@@ -194,12 +194,19 @@ class InvoiceController {
             console.log(`quantity:`, item.quantity);
             
             if (typeof item.total_discount !== 'undefined' && item.total_discount !== null) {
+                console.log('Using total_discount path');
                 itemDiscount = parseFloat(item.total_discount) || 0;
             }
             else if (Array.isArray(item.discount_allocations) && item.discount_allocations.length > 0) {
+                console.log('Using discount_allocations path');
+                console.log('discount_allocations.length:', item.discount_allocations.length);
                 itemDiscount = item.discount_allocations.reduce((sum, alloc) => {
-                    return sum + (parseFloat(alloc.amount) || 0);
+                    const allocAmount = parseFloat(alloc.amount) || 0;
+                    console.log(`  allocation amount: "${alloc.amount}" -> ${allocAmount}`);
+                    return sum + allocAmount;
                 }, 0);
+            } else {
+                console.log('No discount path taken');
             }
             
             console.log(`Calculated discount:`, itemDiscount);
