@@ -35,7 +35,33 @@ class InvoiceController {
         try {
             const order = req.body;
             logger.info({ orderId: order.id }, 'Processing Shopify order');
-            // console.log('Order:', order);
+            // Log discount-related snapshot from the Shopify order payload to diagnose missing discounts
+            try {
+                logger.debug({
+                    orderId: order.id,
+                    currency: order.currency,
+                    total_price: order.total_price,
+                    current_total_price: order.current_total_price,
+                    total_discounts: order.total_discounts,
+                    current_total_discounts: order.current_total_discounts,
+                    discount_applications: order.discount_applications,
+                    line_items: (order.line_items || []).map(li => ({
+                        id: li.id,
+                        title: li.title,
+                        quantity: li.quantity,
+                        price: li.price,
+                        total_discount: li.total_discount,
+                        discount_allocations: li.discount_allocations
+                    })),
+                    shipping_lines: (order.shipping_lines || []).map(s => ({
+                        title: s.title,
+                        price: s.price,
+                        discounted_price: s.discounted_price
+                    }))
+                }, 'Shopify order discounts snapshot');
+            } catch (e) {
+                logger.debug({ error: e?.message }, 'Failed to log Shopify discount snapshot');
+            }
             
             // Transform and create invoice with ANAF company verification (retry logic is in OblioService)
             const invoiceData = await transformOrderWithAnafEnrichment(
@@ -63,6 +89,9 @@ class InvoiceController {
                     management: p.management
                 }))
             }, 'Oblio invoice payload (sanitized)');
+
+            // Also log the full payload for deep debugging (debug level)
+            logger.debug({ payload: cleanedInvoiceData }, 'Oblio invoice payload (full)');
 
             const oblioResponse = await this.oblioService.createInvoice(cleanedInvoiceData);
             
@@ -198,6 +227,18 @@ class InvoiceController {
                     ? parseFloat(((unitPrice * baseQty - lineDiscount) / baseQty).toFixed(2))
                     : unitPrice;
 
+                // Log per-line discount computation for debugging
+                logger.debug({
+                    lineItemId: item.id,
+                    title: item.title,
+                    baseQuantity: baseQty,
+                    refundedQuantity: refundedQty,
+                    finalQuantity: finalQty,
+                    unitPrice,
+                    lineDiscount,
+                    effectiveUnitPrice
+                }, 'Computed effective unit price with discounts');
+
                 return {
                     name: item.title,
                     code: item.sku || item.barcode || String(item.id),
@@ -214,6 +255,12 @@ class InvoiceController {
         if (order.shipping_lines?.length > 0) {
             const s = order.shipping_lines[0];
             const shippingPrice = parseFloat((s.discounted_price ?? s.price));
+            logger.debug({
+                title: s?.title,
+                price: s?.price,
+                discounted_price: s?.discounted_price,
+                computedShippingPrice: shippingPrice
+            }, 'Shipping line discount snapshot');
             if (!isNaN(shippingPrice) && shippingPrice > 0) {
                 products.push({
                     name: 'Transport',
