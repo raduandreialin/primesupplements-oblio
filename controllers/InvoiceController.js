@@ -183,30 +183,13 @@ class InvoiceController {
             });
 
             // Get actual line item discount from Shopify allocations
+            // Always use discount_allocations as the authoritative source
             let itemDiscount = 0;
             
-            // Debug logging for discount values
-            console.log('=== DISCOUNT DEBUG ===');
-            console.log(`Item: ${item.title} (ID: ${item.id})`);
-            console.log(`total_discount:`, item.total_discount);
-            console.log(`discount_allocations:`, JSON.stringify(item.discount_allocations, null, 2));
-            console.log(`original price:`, item.price);
-            console.log(`quantity:`, item.quantity);
-            
-            if (typeof item.total_discount !== 'undefined' && item.total_discount !== null) {
-                console.log('Using total_discount path');
-                itemDiscount = parseFloat(item.total_discount) || 0;
-            }
-            else if (Array.isArray(item.discount_allocations) && item.discount_allocations.length > 0) {
-                console.log('Using discount_allocations path');
-                console.log('discount_allocations.length:', item.discount_allocations.length);
+            if (Array.isArray(item.discount_allocations) && item.discount_allocations.length > 0) {
                 itemDiscount = item.discount_allocations.reduce((sum, alloc) => {
-                    const allocAmount = parseFloat(alloc.amount) || 0;
-                    console.log(`  allocation amount: "${alloc.amount}" -> ${allocAmount}`);
-                    return sum + allocAmount;
+                    return sum + (parseFloat(alloc.amount) || 0);
                 }, 0);
-            } else {
-                console.log('No discount path taken');
             }
             
             console.log(`Calculated discount:`, itemDiscount);
