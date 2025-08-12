@@ -23,6 +23,7 @@ class InvoiceController {
         // Initialize ANAF service for company verification
         this.anafService = new AnafService();
     }
+    
 
     /**
      * Create invoice from Shopify order fulfillment
