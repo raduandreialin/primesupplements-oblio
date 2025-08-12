@@ -150,15 +150,6 @@ class InvoiceController {
     transformShopifyOrderToOblioInvoice(order) {
         const companyCif = process.env.OBLIO_COMPANY_CIF;
         
-        const totalDiscounts = parseFloat(order.current_total_discounts || 0);
-        
-        // Calculate total order value to distribute discounts proportionally
-        const totalOrderValue = order.line_items.reduce((sum, item) => {
-            const qty = item.quantity || 0;
-            const price = parseFloat(item.price) || 0;
-            return sum + (qty * price);
-        }, 0);
-
         // Base products from line items - use original prices and add individual discount lines
         let products = [];
         
@@ -192,25 +183,33 @@ class InvoiceController {
                 management: config.oblio.OBLIO_MANAGEMENT
             });
 
-            // Calculate proportional discount for this item
-            if (totalDiscounts > 0 && totalOrderValue > 0) {
-                const lineTotal = baseQty * unitPrice;
-                const itemDiscount = (lineTotal / totalOrderValue) * totalDiscounts;
+            // Use Shopify's actual discount allocation for this line item
+            let itemDiscount = 0;
+            
+            // Check total_discount first (simpler)
+            if (typeof item.total_discount !== 'undefined' && item.total_discount !== null) {
+                itemDiscount = parseFloat(item.total_discount) || 0;
+            }
+            // Fallback to discount_allocations (more detailed)
+            else if (Array.isArray(item.discount_allocations) && item.discount_allocations.length > 0) {
+                itemDiscount = item.discount_allocations.reduce((sum, alloc) => {
+                    return sum + (parseFloat(alloc.amount) || 0);
+                }, 0);
+            }
+            
+            console.log(`Discount allocation: ${item.title} - itemDisc=${itemDiscount.toFixed(2)}`);
+            
+            if (itemDiscount > 0) {
+                // Add individual discount using proper Oblio discount object
+                const discountObj = {
+                    name: `Discount ${item.title}`,
+                    discountType: 'valoric',
+                    discount: parseFloat(itemDiscount.toFixed(2)),
+                    discountAllAbove: 0  // Apply only to the product immediately above
+                };
                 
-                console.log(`Discount calc: ${item.title} - totalDisc=${totalDiscounts}, itemDisc=${itemDiscount.toFixed(2)}`);
-                
-                if (itemDiscount > 0) {
-                    // Add individual discount using proper Oblio discount object
-                    const discountObj = {
-                        name: `Discount ${item.title}`,
-                        discountType: 'valoric',
-                        discount: parseFloat(itemDiscount.toFixed(2)),
-                        discountAllAbove: 0  // Apply only to the product immediately above
-                    };
-                    
-                    console.log(`Adding discount: ${discountObj.name} = ${discountObj.discount}`);
-                    products.push(discountObj);
-                }
+                console.log(`Adding discount: ${discountObj.name} = ${discountObj.discount}`);
+                products.push(discountObj);
             }
         });
 
