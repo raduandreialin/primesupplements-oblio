@@ -283,6 +283,9 @@ class InvoiceController {
               }
             : undefined;
 
+        // Log final products array being sent to Oblio
+        console.log(`Final products count: ${products.length} (${products.filter(p => p.discount).length} discounts)`);
+        
         return {
             cif: companyCif,
             client,
