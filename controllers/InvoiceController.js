@@ -370,7 +370,7 @@ class InvoiceController {
         // Build collect object only for fully paid orders. Value is optional (defaults to invoice total in Oblio)
         const collect = isPaid
             ? {
-                  type: 'Plata card',
+                  type: 'Card',
                   documentNumber: String(order.order_number || order.name || order.id)
               }
             : undefined;
