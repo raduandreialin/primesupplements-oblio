@@ -185,6 +185,14 @@ class InvoiceController {
             // Get actual line item discount from Shopify allocations
             let itemDiscount = 0;
             
+            // Debug logging for discount values
+            console.log('=== DISCOUNT DEBUG ===');
+            console.log(`Item: ${item.title} (ID: ${item.id})`);
+            console.log(`total_discount:`, item.total_discount);
+            console.log(`discount_allocations:`, JSON.stringify(item.discount_allocations, null, 2));
+            console.log(`original price:`, item.price);
+            console.log(`quantity:`, item.quantity);
+            
             if (typeof item.total_discount !== 'undefined' && item.total_discount !== null) {
                 itemDiscount = parseFloat(item.total_discount) || 0;
             }
@@ -193,6 +201,9 @@ class InvoiceController {
                     return sum + (parseFloat(alloc.amount) || 0);
                 }, 0);
             }
+            
+            console.log(`Calculated discount:`, itemDiscount);
+            console.log('======================');
             
             // Add discount as separate line using Oblio discount object format
             if (itemDiscount > 0) {
