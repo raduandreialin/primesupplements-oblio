@@ -210,8 +210,8 @@ class InvoiceController {
                         quantity: 1,
                         measuringUnit: 'buc',
                         currency: order.currency,
-                        productType: 'Reducere comerciala acordata',
-                        management: config.oblio.OBLIO_MANAGEMENT
+                        productType: 'Reducere comerciala acordata'
+                        // No management field - discounts should not affect inventory
                     });
                 }
             }
