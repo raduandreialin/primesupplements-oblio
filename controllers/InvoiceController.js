@@ -125,8 +125,15 @@ class InvoiceController {
             
             // Check if order has error tag - only process if it does
             const hasErrorTag = order.tags && order.tags.includes('EROARE FACTURARE');
+            const hasSuccessTag = order.tags && (order.tags.includes('oblio-invoiced') || order.tags.includes('FACTURA-'));
+            
             if (!hasErrorTag) {
                 console.log(`⏭️ Order ${order.name} updated but no EROARE FACTURARE tag - skipping retry`);
+                return;
+            }
+            
+            if (hasSuccessTag) {
+                console.log(`⏭️ Order ${order.name} already has success tags - skipping retry to prevent loop`);
                 return;
             }
             
