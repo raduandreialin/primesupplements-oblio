@@ -35,8 +35,7 @@ class InvoiceController {
         try {
             const order = req.body;
             logger.info({ orderId: order.id }, 'Processing Shopify order');
-            // Log discount information
-            console.log(`Discount check - Order ${order.id}: current_total_discounts=${order.current_total_discounts}`);
+
             // Transform and create invoice with ANAF company verification (retry logic is in OblioService)
             const invoiceData = await transformOrderWithAnafEnrichment(
                 order,
@@ -183,33 +182,26 @@ class InvoiceController {
                 management: config.oblio.OBLIO_MANAGEMENT
             });
 
-            // Use Shopify's actual discount allocation for this line item
+            // Get actual line item discount from Shopify allocations
             let itemDiscount = 0;
             
-            // Check total_discount first (simpler)
             if (typeof item.total_discount !== 'undefined' && item.total_discount !== null) {
                 itemDiscount = parseFloat(item.total_discount) || 0;
             }
-            // Fallback to discount_allocations (more detailed)
             else if (Array.isArray(item.discount_allocations) && item.discount_allocations.length > 0) {
                 itemDiscount = item.discount_allocations.reduce((sum, alloc) => {
                     return sum + (parseFloat(alloc.amount) || 0);
                 }, 0);
             }
             
-            console.log(`Discount allocation: ${item.title} - itemDisc=${itemDiscount.toFixed(2)}`);
-            
+            // Add discount as separate line using Oblio discount object format
             if (itemDiscount > 0) {
-                // Add individual discount using proper Oblio discount object
-                const discountObj = {
+                products.push({
                     name: `Discount ${item.title}`,
                     discountType: 'valoric',
-                    discount: parseFloat(itemDiscount.toFixed(2)),
-                    discountAllAbove: 0  // Apply only to the product immediately above
-                };
-                
-                console.log(`Adding discount: ${discountObj.name} = ${discountObj.discount}`);
-                products.push(discountObj);
+                    discount: itemDiscount,
+                    discountAllAbove: 0
+                });
             }
         });
 
@@ -230,18 +222,21 @@ class InvoiceController {
             }
         }
 
-        // Note on discounts:
-        // We add individual discount lines per product as negative price items, matching the pattern from old invoices.
-        // Each discount line is proportional to the product's share of total order value.
+
 
         // Final sanitation: remove invalid/zero items (Oblio may reject them)
         // Allow negative prices for discount lines
         products = products.filter(p => {
+            // Regular products need price and quantity
             const validProduct = p && typeof p.price === 'number' && !isNaN(p.price) && p.quantity > 0;
-            if (!validProduct) {
+            // Discount objects need discount value (no price or quantity required)
+            const validDiscount = p && typeof p.discount === 'number' && !isNaN(p.discount) && p.discount > 0;
+            
+            const isValid = validProduct || validDiscount;
+            if (!isValid) {
                 // intentionally silent per request to minimize debug logs
             }
-            return validProduct;
+            return isValid;
         });
 
         // Build address fields per Oblio expected format
@@ -282,8 +277,7 @@ class InvoiceController {
               }
             : undefined;
 
-        // Log final products array being sent to Oblio
-        console.log(`Final products count: ${products.length} (${products.filter(p => p.discount).length} discounts)`);
+
         
         return {
             cif: companyCif,
