@@ -193,6 +193,7 @@ class InvoiceController {
                 quantity: finalQty,
                 measuringUnit: 'buc',
                 currency: order.currency,
+                productType: 'Marfa',
                 management: config.oblio.OBLIO_MANAGEMENT
             });
 
@@ -209,6 +210,7 @@ class InvoiceController {
                         quantity: 1,
                         measuringUnit: 'buc',
                         currency: order.currency,
+                        productType: 'Reducere comerciala acordata',
                         management: config.oblio.OBLIO_MANAGEMENT
                     });
                 }
@@ -226,6 +228,7 @@ class InvoiceController {
                     quantity: 1,
                     measuringUnit: 'buc',
                     currency: order.currency,
+                    productType: 'Serviciu',
                     management: config.oblio.OBLIO_MANAGEMENT
                 });
             }
