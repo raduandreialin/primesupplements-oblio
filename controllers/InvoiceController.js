@@ -202,14 +202,25 @@ class InvoiceController {
                 const lineTotal = baseQty * unitPrice;
                 const itemDiscount = (lineTotal / totalOrderValue) * totalDiscounts;
                 
+                logger.info({
+                    product: item.title,
+                    totalDiscounts,
+                    totalOrderValue,
+                    lineTotal,
+                    itemDiscount
+                }, 'Discount calculation per item');
+                
                 if (itemDiscount > 0) {
                     // Add individual discount using proper Oblio discount object
-                    products.push({
+                    const discountObj = {
                         name: `Discount ${item.title}`,
                         discountType: 'valoric',
                         discount: parseFloat(itemDiscount.toFixed(2)),
                         discountAllAbove: 0  // Apply only to the product immediately above
-                    });
+                    };
+                    
+                    logger.info({ discountObj }, 'Adding discount object to products');
+                    products.push(discountObj);
                 }
             }
         });
