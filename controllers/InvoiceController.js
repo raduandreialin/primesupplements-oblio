@@ -36,12 +36,11 @@ class InvoiceController {
             const order = req.body;
             logger.info({ orderId: order.id }, 'Processing Shopify order');
             // Log discount information
-            logger.info({ 
-                orderId: order.id, 
-                current_total_discounts: order.current_total_discounts,
-                total_discounts: order.total_discounts,
-                discount_applications: order.discount_applications 
-            }, 'Shopify discount info');
+            console.log('=== SHOPIFY DISCOUNT INFO ===');
+            console.log('Order ID:', order.id);
+            console.log('current_total_discounts:', order.current_total_discounts);
+            console.log('total_discounts:', order.total_discounts);
+            console.log('discount_applications:', JSON.stringify(order.discount_applications, null, 2));
             // Transform and create invoice with ANAF company verification (retry logic is in OblioService)
             const invoiceData = await transformOrderWithAnafEnrichment(
                 order,
@@ -202,13 +201,12 @@ class InvoiceController {
                 const lineTotal = baseQty * unitPrice;
                 const itemDiscount = (lineTotal / totalOrderValue) * totalDiscounts;
                 
-                logger.info({
-                    product: item.title,
-                    totalDiscounts,
-                    totalOrderValue,
-                    lineTotal,
-                    itemDiscount
-                }, 'Discount calculation per item');
+                console.log('=== DISCOUNT CALCULATION ===');
+                console.log('Product:', item.title);
+                console.log('totalDiscounts:', totalDiscounts);
+                console.log('totalOrderValue:', totalOrderValue);
+                console.log('lineTotal:', lineTotal);
+                console.log('itemDiscount:', itemDiscount);
                 
                 if (itemDiscount > 0) {
                     // Add individual discount using proper Oblio discount object
@@ -219,8 +217,11 @@ class InvoiceController {
                         discountAllAbove: 0  // Apply only to the product immediately above
                     };
                     
-                    logger.info({ discountObj }, 'Adding discount object to products');
+                    console.log('=== ADDING DISCOUNT OBJECT ===');
+                    console.log(JSON.stringify(discountObj, null, 2));
                     products.push(discountObj);
+                } else {
+                    console.log('No discount added - itemDiscount is 0 or negative');
                 }
             }
         });
