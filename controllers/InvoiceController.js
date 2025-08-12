@@ -35,35 +35,8 @@ class InvoiceController {
         try {
             const order = req.body;
             logger.info({ orderId: order.id }, 'Processing Shopify order');
-            console.log('Order:', order);
-            // Log discount-related snapshot from the Shopify order payload to diagnose missing discounts
-            try {
-                logger.debug({
-                    orderId: order.id,
-                    currency: order.currency,
-                    total_price: order.total_price,
-                    current_total_price: order.current_total_price,
-                    total_discounts: order.total_discounts,
-                    current_total_discounts: order.current_total_discounts,
-                    discount_applications: order.discount_applications,
-                    line_items: (order.line_items || []).map(li => ({
-                        id: li.id,
-                        title: li.title,
-                        quantity: li.quantity,
-                        price: li.price,
-                        total_discount: li.total_discount,
-                        discount_allocations: li.discount_allocations
-                    })),
-                    shipping_lines: (order.shipping_lines || []).map(s => ({
-                        title: s.title,
-                        price: s.price,
-                        discounted_price: s.discounted_price
-                    }))
-                }, 'Shopify order discounts snapshot');
-            } catch (e) {
-                logger.debug({ error: e?.message }, 'Failed to log Shopify discount snapshot');
-            }
-            
+            // Log only discount applications as requested
+            logger.info({ orderId: order.id, discount_applications: order.discount_applications }, 'Shopify discount_applications');
             // Transform and create invoice with ANAF company verification (retry logic is in OblioService)
             const invoiceData = await transformOrderWithAnafEnrichment(
                 order,
@@ -78,21 +51,7 @@ class InvoiceController {
             // Clean payload: remove undefined/null values before sending to Oblio
             const cleanedInvoiceData = this.sanitizeOblioPayload(invoiceData);
             
-            logger.debug({
-                cif: cleanedInvoiceData.cif,
-                seriesName: cleanedInvoiceData.seriesName,
-                issueDate: cleanedInvoiceData.issueDate,
-                client: cleanedInvoiceData.client,
-                products: cleanedInvoiceData.products?.map(p => ({
-                    name: p.name,
-                    quantity: p.quantity,
-                    price: p.price,
-                    management: p.management
-                }))
-            }, 'Oblio invoice payload (sanitized)');
-
-            // Also log the full payload for deep debugging (debug level)
-            logger.debug({ payload: cleanedInvoiceData }, 'Oblio invoice payload (full)');
+            
 
             const oblioResponse = await this.oblioService.createInvoice(cleanedInvoiceData);
             
@@ -206,39 +165,13 @@ class InvoiceController {
 
                 const finalQty = Math.max(0, baseQty - refundedQty);
                 if (finalQty <= 0) {
-                    logger.debug({
-                        id: item.id,
-                        title: item.title,
-                        orderedQuantity: baseQty,
-                        refundedQuantity: refundedQty,
-                        resultingQuantity: finalQty
-                    }, 'Skipping item with non-positive invoice quantity (after refunds)');
                     return null;
                 }
 
-                // Compute effective unit price including any Shopify discounts allocated to this line
+                // Use original unit price; apply discounts via a consolidated discount line in Oblio
                 const unitPrice = parseFloat(item.price);
-                const lineDiscount = (typeof item.total_discount !== 'undefined'
-                    ? parseFloat(item.total_discount)
-                    : Array.isArray(item.discount_allocations)
-                        ? item.discount_allocations.reduce((sum, alloc) => sum + (parseFloat(alloc.amount) || 0), 0)
-                        : 0) || 0;
+                const effectiveUnitPrice = unitPrice;
 
-                const effectiveUnitPrice = baseQty > 0
-                    ? parseFloat(((unitPrice * baseQty - lineDiscount) / baseQty).toFixed(2))
-                    : unitPrice;
-
-                // Log per-line discount computation for debugging
-                logger.debug({
-                    lineItemId: item.id,
-                    title: item.title,
-                    baseQuantity: baseQty,
-                    refundedQuantity: refundedQty,
-                    finalQuantity: finalQty,
-                    unitPrice,
-                    lineDiscount,
-                    effectiveUnitPrice
-                }, 'Computed effective unit price with discounts');
 
                 return {
                     name: item.title,
@@ -252,16 +185,32 @@ class InvoiceController {
             })
             .filter(Boolean);
 
+        // Add a consolidated discount line that applies to all product lines above
+        const totalLineDiscount = (order.line_items || []).reduce((sum, li) => {
+            if (typeof li.total_discount !== 'undefined') {
+                const value = parseFloat(li.total_discount);
+                return sum + (isNaN(value) ? 0 : value);
+            }
+            if (Array.isArray(li.discount_allocations)) {
+                const allocated = li.discount_allocations.reduce((acc, alloc) => acc + (parseFloat(alloc.amount) || 0), 0);
+                return sum + allocated;
+            }
+            return sum;
+        }, 0);
+
+        if (totalLineDiscount > 0 && products.length > 0) {
+            products.push({
+                name: 'Discount Shopify',
+                discountType: 'valoric',
+                discount: parseFloat(totalLineDiscount.toFixed(2)),
+                discountAllAbove: 1
+            });
+        }
+
         // Add shipping if exists
         if (order.shipping_lines?.length > 0) {
             const s = order.shipping_lines[0];
             const shippingPrice = parseFloat((s.discounted_price ?? s.price));
-            logger.debug({
-                title: s?.title,
-                price: s?.price,
-                discounted_price: s?.discounted_price,
-                computedShippingPrice: shippingPrice
-            }, 'Shipping line discount snapshot');
             if (!isNaN(shippingPrice) && shippingPrice > 0) {
                 products.push({
                     name: 'Transport',
@@ -272,26 +221,24 @@ class InvoiceController {
                     vatName: process.env.OBLIO_DEFAULT_VAT_NAME || 'Normala',
                     management: config.oblio.OBLIO_MANAGEMENT
                 });
-            } else {
-                logger.debug({
-                    title: s?.title,
-                    price: s?.price,
-                    discounted_price: s?.discounted_price
-                }, 'Skipping shipping line (free or invalid price)');
             }
         }
 
         // Note on discounts:
-        // We incorporate Shopify discounts into each line's unit price using total_discount/discount_allocations.
-        // We intentionally avoid sending standalone discount lines to Oblio to keep the payload simple and robust.
+        // We now send a single consolidated discount line (valoric) that applies to all products above.
+        // The value is computed from Shopify line-item total_discount/discount_allocations.
 
         // Final sanitation: remove invalid/zero items (Oblio may reject them)
         products = products.filter(p => {
-            const valid = p && typeof p.price === 'number' && !isNaN(p.price) && p.price > 0 && p.quantity > 0;
-            if (!valid) {
-                logger.debug({ product: p }, 'Skipping non-invoiceable product line');
+            const isDiscountLine = p && typeof p.discount === 'number' && p.discount > 0;
+            if (isDiscountLine) {
+                return true;
             }
-            return valid;
+            const validProduct = p && typeof p.price === 'number' && !isNaN(p.price) && p.price > 0 && p.quantity > 0;
+            if (!validProduct) {
+                // intentionally silent per request to minimize debug logs
+            }
+            return validProduct;
         });
 
         // Build address fields per Oblio expected format
