@@ -11,6 +11,12 @@ router.post('/shopify/invoice/create',
     InvoiceController.createFromShopifyOrder.bind(InvoiceController)
 );
 
+// Shopify webhook: Order updated -> Retry invoice creation if has EROARE FACTURARE tag
+router.post('/shopify/invoice/retry', 
+    verifyShopifyWebhook, 
+    InvoiceController.retryFromShopifyOrderUpdate.bind(InvoiceController)
+);
+
 // Health check endpoint
 router.get('/health', (req, res) => {
     res.json({ status: 'OK', timestamp: new Date().toISOString() });
