@@ -36,11 +36,7 @@ class InvoiceController {
             const order = req.body;
             logger.info({ orderId: order.id }, 'Processing Shopify order');
             // Log discount information
-            console.log('=== SHOPIFY DISCOUNT INFO ===');
-            console.log('Order ID:', order.id);
-            console.log('current_total_discounts:', order.current_total_discounts);
-            console.log('total_discounts:', order.total_discounts);
-            console.log('discount_applications:', JSON.stringify(order.discount_applications, null, 2));
+            console.log(`Discount check - Order ${order.id}: current_total_discounts=${order.current_total_discounts}`);
             // Transform and create invoice with ANAF company verification (retry logic is in OblioService)
             const invoiceData = await transformOrderWithAnafEnrichment(
                 order,
@@ -201,12 +197,7 @@ class InvoiceController {
                 const lineTotal = baseQty * unitPrice;
                 const itemDiscount = (lineTotal / totalOrderValue) * totalDiscounts;
                 
-                console.log('=== DISCOUNT CALCULATION ===');
-                console.log('Product:', item.title);
-                console.log('totalDiscounts:', totalDiscounts);
-                console.log('totalOrderValue:', totalOrderValue);
-                console.log('lineTotal:', lineTotal);
-                console.log('itemDiscount:', itemDiscount);
+                console.log(`Discount calc: ${item.title} - totalDisc=${totalDiscounts}, itemDisc=${itemDiscount.toFixed(2)}`);
                 
                 if (itemDiscount > 0) {
                     // Add individual discount using proper Oblio discount object
@@ -217,11 +208,8 @@ class InvoiceController {
                         discountAllAbove: 0  // Apply only to the product immediately above
                     };
                     
-                    console.log('=== ADDING DISCOUNT OBJECT ===');
-                    console.log(JSON.stringify(discountObj, null, 2));
+                    console.log(`Adding discount: ${discountObj.name} = ${discountObj.discount}`);
                     products.push(discountObj);
-                } else {
-                    console.log('No discount added - itemDiscount is 0 or negative');
                 }
             }
         });
