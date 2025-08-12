@@ -203,15 +203,12 @@ class InvoiceController {
                 const itemDiscount = (lineTotal / totalOrderValue) * totalDiscounts;
                 
                 if (itemDiscount > 0) {
-                    // Add individual discount line as negative price product (matching your old invoices)
+                    // Add individual discount using proper Oblio discount object
                     products.push({
                         name: `Discount ${item.title}`,
-                        price: -parseFloat(itemDiscount.toFixed(2)),
-                        quantity: 1,
-                        measuringUnit: 'buc',
-                        currency: order.currency,
-                        productType: 'Reducere comerciala acordata'
-                        // No management field to avoid inventory tracking
+                        discountType: 'valoric',
+                        discount: parseFloat(itemDiscount.toFixed(2)),
+                        discountAllAbove: 0  // Apply only to the product immediately above
                     });
                 }
             }
@@ -294,7 +291,7 @@ class InvoiceController {
             language: 'RO',
             mentions: `Factura emisa pentru comanda ${order.name}`,
             sendEmail: 1,
-            useStock: 0,
+            useStock: 1,
             collectDate: isPaid ? collectDate : undefined,
             collect,
             products
