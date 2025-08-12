@@ -138,6 +138,26 @@ class InvoiceController {
             // Use original unit price
             const unitPrice = parseFloat(item.price);
 
+            // Extract VAT info from line item tax_lines
+            let vatPercentage = 21; // Default Romanian standard rate
+            let vatName = 'Normala'; // Default
+            
+            if (item.tax_lines && item.tax_lines.length > 0) {
+                const taxRate = item.tax_lines[0].rate;
+                vatPercentage = Math.round(taxRate * 100);
+                
+                // Map current Romanian VAT rates
+                if (vatPercentage === 21) {
+                    vatName = 'Normala';
+                } else if (vatPercentage === 11) {
+                    vatName = 'Redusa';
+                } else if (vatPercentage === 0) {
+                    vatName = 'SFDD';
+                }
+                
+                console.log(`📊 Item "${item.title}" VAT: ${vatPercentage}% (${vatName})`);
+            }
+
             // Add the product line
             products.push({
                 name: item.title,
@@ -147,7 +167,10 @@ class InvoiceController {
                 measuringUnit: 'buc',
                 currency: order.currency,
                 productType: 'Marfa',
-                management: config.oblio.OBLIO_MANAGEMENT
+                management: config.oblio.OBLIO_MANAGEMENT,
+                vatName: vatName,
+                vatPercentage: vatPercentage,
+                vatIncluded: order.taxes_included ? 1 : 0
             });
 
             // Get actual line item discount from Shopify allocations
@@ -189,8 +212,6 @@ class InvoiceController {
                 });
             }
         }
-
-
 
         // Final sanitation: remove invalid/zero items (Oblio may reject them)
         // Allow negative prices for discount lines
@@ -240,7 +261,7 @@ class InvoiceController {
         // Build collect object only for fully paid orders. Value is optional (defaults to invoice total in Oblio)
         const collect = isPaid
             ? {
-                  type: 'Ordin de plata',
+                  type: 'Plata card',
                   documentNumber: String(order.order_number || order.name || order.id)
               }
             : undefined;
