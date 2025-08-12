@@ -185,24 +185,13 @@ class InvoiceController {
             })
             .filter(Boolean);
 
-        // Add a consolidated discount line that applies to all product lines above
-        const totalLineDiscount = (order.line_items || []).reduce((sum, li) => {
-            if (typeof li.total_discount !== 'undefined') {
-                const value = parseFloat(li.total_discount);
-                return sum + (isNaN(value) ? 0 : value);
-            }
-            if (Array.isArray(li.discount_allocations)) {
-                const allocated = li.discount_allocations.reduce((acc, alloc) => acc + (parseFloat(alloc.amount) || 0), 0);
-                return sum + allocated;
-            }
-            return sum;
-        }, 0);
-
-        if (totalLineDiscount > 0 && products.length > 0) {
+        // Add discount line from Shopify current_total_discounts
+        const totalDiscounts = parseFloat(order.current_total_discounts || 0);
+        if (totalDiscounts > 0 && products.length > 0) {
             products.push({
-                name: 'Discount Shopify',
+                name: 'Discount',
                 discountType: 'valoric',
-                discount: parseFloat(totalLineDiscount.toFixed(2)),
+                discount: totalDiscounts,
                 discountAllAbove: 1
             });
         }
@@ -225,8 +214,7 @@ class InvoiceController {
         }
 
         // Note on discounts:
-        // We now send a single consolidated discount line (valoric) that applies to all products above.
-        // The value is computed from Shopify line-item total_discount/discount_allocations.
+        // We send a discount line using Shopify's current_total_discounts that applies to all products above.
 
         // Final sanitation: remove invalid/zero items (Oblio may reject them)
         products = products.filter(p => {
