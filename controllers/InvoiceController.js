@@ -203,15 +203,11 @@ class InvoiceController {
                 const itemDiscount = (lineTotal / totalOrderValue) * totalDiscounts;
                 
                 if (itemDiscount > 0) {
-                    // Add individual discount line for this product
+                    // Add individual discount using Oblio's discount object format
                     products.push({
                         name: `Discount ${item.title}`,
-                        price: -parseFloat(itemDiscount.toFixed(2)),
-                        quantity: 1,
-                        measuringUnit: 'buc',
-                        currency: order.currency,
-                        productType: 'Reducere comerciala acordata'
-                        // No management field - discounts should not affect inventory
+                        discountType: 'valoric',
+                        discount: parseFloat(itemDiscount.toFixed(2))
                     });
                 }
             }
