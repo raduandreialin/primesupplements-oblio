@@ -15,10 +15,14 @@ app.use(pinoHttp({
 }));
 
 // Capture raw body for webhook verification (before JSON parsing)
-app.use('/webhooks/shopify', express.raw({ type: 'application/json', verify: captureRawBody }));
+app.use('/webhooks/shopify', express.raw({ 
+    type: 'application/json', 
+    limit: '10mb',  // Increase limit for large Shopify webhooks
+    verify: captureRawBody 
+}));
 
 // Regular JSON parsing for other routes
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 
 // Routes
 app.use('/webhooks', webhookRoutes);
