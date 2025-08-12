@@ -35,6 +35,7 @@ class InvoiceController {
         try {
             const order = req.body;
             logger.info({ orderId: order.id }, 'Processing Shopify order');
+            console.log('Order:', order);
             // Log discount-related snapshot from the Shopify order payload to diagnose missing discounts
             try {
                 logger.debug({
