@@ -112,6 +112,107 @@ class InvoiceController {
     }
 
     /**
+     * Retry invoice creation from Shopify order update
+     * Only processes orders with "EROARE FACTURARE" tag
+     * Always returns 200 to Shopify (webhook acknowledgment)
+     */
+    async retryFromShopifyOrderUpdate(req, res) {
+        // Always acknowledge webhook receipt first
+        res.status(200).json({ received: true });
+        
+        try {
+            const order = req.body;
+            
+            // Check if order has error tag - only process if it does
+            const hasErrorTag = order.tags && order.tags.includes('EROARE FACTURARE');
+            if (!hasErrorTag) {
+                console.log(`⏭️ Order ${order.name} updated but no EROARE FACTURARE tag - skipping retry`);
+                return;
+            }
+            
+            console.log(`🔄 Retrying invoice creation for order #${order.name} (ID: ${order.id})`);
+
+            // Transform and create invoice with ANAF company verification
+            const invoiceData = await transformOrderWithAnafEnrichment(
+                order,
+                this.transformShopifyOrderToOblioInvoice.bind(this),
+                this.anafService
+            );
+            if (!invoiceData.products || invoiceData.products.length === 0) {
+                throw new Error('No invoiceable items: all line items removed or non-invoiceable (e.g., free shipping).');
+            }
+
+            const cleanedInvoiceData = this.sanitizeOblioPayload(invoiceData);
+            const oblioResponse = await this.oblioService.createInvoice(cleanedInvoiceData);
+            
+            console.log(`✅ Invoice #${oblioResponse.data?.number} created successfully for order ${order.name} - Customer: ${order.customer?.email}`);
+            
+            // Success: Clean error tags and add success tags
+            try {
+                // Remove error tags and add success tags
+                const currentTags = order.tags ? order.tags.split(', ').filter(tag => 
+                    !tag.includes('EROARE FACTURARE') && !tag.startsWith('error-')
+                ) : [];
+                
+                const newTags = [
+                    ...currentTags,
+                    'oblio-invoiced',
+                    `FACTURA-${oblioResponse.data?.number || 'unknown'}`
+                ];
+                
+                await this.shopifyService.tagOrder(order.id, newTags);
+                console.log(`🧹 Cleaned error tags and added success tags for order ${order.name}`);
+                
+                // Set invoice metafields
+                const invoiceUrl = oblioResponse.data?.link || `https://www.oblio.eu/docs/invoice?cif=${process.env.OBLIO_COMPANY_CIF}&seriesName=${oblioResponse.data?.seriesName || process.env.OBLIO_INVOICE_SERIES}&number=${oblioResponse.data?.number}`;
+                
+                await this.shopifyService.setInvoiceMetafields(
+                    order.id,
+                    oblioResponse.data?.number || 'unknown',
+                    invoiceUrl,
+                    oblioResponse.data?.seriesName || process.env.OBLIO_INVOICE_SERIES
+                );
+                
+                console.log(`📋 Invoice metafields set for order ${order.name} - URL: ${invoiceUrl}`);
+                
+            } catch (shopifyError) {
+                console.warn(`⚠️ Failed to update Shopify order ${order.id} (invoice still created): ${shopifyError.message}`);
+            }
+            
+        } catch (error) {
+            const orderId = req.body?.id || 'unknown';
+            
+            console.error(`❌ Invoice retry failed for order ${orderId}: ${error.message}`);
+            
+            // Update error tag with new timestamp but keep the error status
+            try {
+                const currentTags = req.body.tags ? req.body.tags.split(', ').filter(tag => 
+                    !tag.startsWith('error-')
+                ) : [];
+                
+                const newTags = [
+                    ...currentTags,
+                    `error-${new Date().toISOString().split('T')[0]}-retry`
+                ];
+                
+                await this.shopifyService.tagOrder(orderId, newTags);
+                console.log(`🚨 Updated error tag for retry attempt on order ${orderId}`);
+                
+                // Update error metafield
+                const httpStatus = error.response?.status;
+                const statusMessage = error.response?.data?.statusMessage || error.response?.data?.message;
+                const composedMsg = `Retry facturare esuata: ${error.message}${httpStatus ? ` (HTTP ${httpStatus})` : ''}${statusMessage ? ` | ${statusMessage}` : ''}. Retry timestamp: ${new Date().toISOString()}`;
+
+                await this.shopifyService.setErrorMetafield(orderId, composedMsg);
+                console.log(`📝 Error metafield updated for retry attempt on order ${orderId}: ${composedMsg}`);
+                
+            } catch (shopifyError) {
+                console.warn(`⚠️ Failed to update Shopify order ${orderId} with retry error status - Shopify: ${shopifyError.message}, Original: ${error.message}`);
+            }
+        }
+    }
+
+    /**
      * Transform Shopify order to Oblio invoice format
      * @private
      */
