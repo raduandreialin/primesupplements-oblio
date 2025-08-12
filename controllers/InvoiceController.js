@@ -34,7 +34,7 @@ class InvoiceController {
         
         try {
             const order = req.body;
-            logger.info({ orderId: order.id }, 'Processing Shopify order');
+            console.log(`🛒 Processing Shopify order #${order.name} (ID: ${order.id})`);
 
             // Transform and create invoice with ANAF company verification (retry logic is in OblioService)
             const invoiceData = await transformOrderWithAnafEnrichment(
@@ -46,19 +46,10 @@ class InvoiceController {
                 throw new Error('No invoiceable items: all line items removed or non-invoiceable (e.g., free shipping).');
             }
 
-            // Debug: log sanitized payload to help diagnose 400s
-            // Clean payload: remove undefined/null values before sending to Oblio
             const cleanedInvoiceData = this.sanitizeOblioPayload(invoiceData);
-            
-            
-
             const oblioResponse = await this.oblioService.createInvoice(cleanedInvoiceData);
             
-            logger.info({
-                orderId: order.id,
-                invoiceNumber: oblioResponse.data?.number,
-                customer: order.customer?.email
-            }, 'Invoice created successfully');
+            console.log(`✅ Invoice #${oblioResponse.data?.number} created successfully for order ${order.name} - Customer: ${order.customer?.email}`);
             
             // Tag the order and set metafields in Shopify
             try {
@@ -68,10 +59,7 @@ class InvoiceController {
                     `FACTURA-${oblioResponse.data?.number || 'unknown'}`
                 ]);
                 
-                logger.info({
-                    orderId: order.id,
-                    tags: ['oblio-invoiced', `FACTURA-${oblioResponse.data?.number || 'unknown'}`]
-                }, 'Order tagged successfully');
+                console.log(`🏷️ Order ${order.name} tagged: oblio-invoiced, FACTURA-${oblioResponse.data?.number}`);
                 
                 // Set invoice metafields
                 // Use the actual URL from Oblio response, or construct from response data
@@ -84,28 +72,18 @@ class InvoiceController {
                     oblioResponse.data?.seriesName || process.env.OBLIO_INVOICE_SERIES
                 );
                 
-                logger.info({
-                    orderId: order.id,
-                    invoiceNumber: oblioResponse.data?.number,
-                    invoiceUrl
-                }, 'Invoice metafields set successfully');
+                console.log(`📋 Invoice metafields set for order ${order.name} - URL: ${invoiceUrl}`);
                 
             } catch (shopifyError) {
                 // Don't fail the whole process if Shopify updates fail
-                logger.warn({
-                    orderId: order.id,
-                    error: shopifyError.message
-                }, 'Failed to update Shopify order (invoice still created)');
+                console.warn(`⚠️ Failed to update Shopify order ${order.id} (invoice still created): ${shopifyError.message}`);
             }
             
         } catch (error) {
             const orderId = req.body?.id || 'unknown';
             
             // Log final failure (after all retries in service layer)
-            logger.error({
-                orderId,
-                error: error.message
-            }, 'Invoice creation failed permanently');
+            console.error(`❌ Invoice creation failed permanently for order ${orderId}: ${error.message}`);
             
             // Tag the order and set error metafield
             try {
@@ -115,10 +93,7 @@ class InvoiceController {
                     `error-${new Date().toISOString().split('T')[0]}` // error-2025-01-07
                 ]);
                 
-                logger.info({
-                    orderId,
-                    tags: ['EROARE FACTURARE', `error-${new Date().toISOString().split('T')[0]}`]
-                }, 'Order tagged with error status');
+                console.log(`🚨 Order ${orderId} tagged with error status: EROARE FACTURARE, error-${new Date().toISOString().split('T')[0]}`);
                 
                 // Set error metafield
                 const httpStatus = error.response?.status;
@@ -127,17 +102,10 @@ class InvoiceController {
 
                 await this.shopifyService.setErrorMetafield(orderId, composedMsg);
                 
-                logger.info({
-                    orderId,
-                    errorMessage: composedMsg
-                }, 'Error metafield set successfully');
+                console.log(`📝 Error metafield set for order ${orderId}: ${composedMsg}`);
                 
             } catch (shopifyError) {
-                logger.warn({
-                    orderId,
-                    shopifyError: shopifyError.message,
-                    originalError: error.message
-                }, 'Failed to update Shopify order with error status');
+                console.warn(`⚠️ Failed to update Shopify order ${orderId} with error status - Shopify: ${shopifyError.message}, Original: ${error.message}`);
             }
         }
     }
@@ -190,10 +158,8 @@ class InvoiceController {
                 itemDiscount = item.discount_allocations.reduce((sum, alloc) => {
                     return sum + (parseFloat(alloc.amount) || 0);
                 }, 0);
+                console.log(`💰 Item "${item.title}" has discount: ${itemDiscount} ${order.currency}`);
             }
-            
-            console.log(`Calculated discount:`, itemDiscount);
-            console.log('======================');
             
             // Add discount as separate line using Oblio discount object format
             if (itemDiscount > 0) {
@@ -203,6 +169,7 @@ class InvoiceController {
                     discount: itemDiscount,
                     discountAllAbove: 0
                 });
+                console.log(`🎯 Added discount line: "Discount ${item.title}" - ${itemDiscount} ${order.currency}`);
             }
         });
 
