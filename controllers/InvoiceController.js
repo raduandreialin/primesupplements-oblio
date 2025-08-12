@@ -186,10 +186,22 @@ class InvoiceController {
                     return null;
                 }
 
+                // Compute effective unit price including any Shopify discounts allocated to this line
+                const unitPrice = parseFloat(item.price);
+                const lineDiscount = (typeof item.total_discount !== 'undefined'
+                    ? parseFloat(item.total_discount)
+                    : Array.isArray(item.discount_allocations)
+                        ? item.discount_allocations.reduce((sum, alloc) => sum + (parseFloat(alloc.amount) || 0), 0)
+                        : 0) || 0;
+
+                const effectiveUnitPrice = baseQty > 0
+                    ? parseFloat(((unitPrice * baseQty - lineDiscount) / baseQty).toFixed(2))
+                    : unitPrice;
+
                 return {
                     name: item.title,
                     code: item.sku || item.barcode || String(item.id),
-                    price: parseFloat(item.price),
+                    price: effectiveUnitPrice,
                     quantity: finalQty, // Use original quantity minus any refunds
                     measuringUnit: 'buc',
                     currency: order.currency,
@@ -200,7 +212,8 @@ class InvoiceController {
 
         // Add shipping if exists
         if (order.shipping_lines?.length > 0) {
-            const shippingPrice = parseFloat(order.shipping_lines[0].price);
+            const s = order.shipping_lines[0];
+            const shippingPrice = parseFloat((s.discounted_price ?? s.price));
             if (!isNaN(shippingPrice) && shippingPrice > 0) {
                 products.push({
                     name: 'Transport',
@@ -213,21 +226,16 @@ class InvoiceController {
                 });
             } else {
                 logger.debug({
-                    title: order.shipping_lines[0]?.title,
-                    price: order.shipping_lines[0]?.price
+                    title: s?.title,
+                    price: s?.price,
+                    discounted_price: s?.discounted_price
                 }, 'Skipping shipping line (free or invalid price)');
             }
         }
 
         // Note on discounts:
-        // Oblio items should not be standalone discount-only lines without price/quantity.
-        // Applying order-level discounts requires a different payload not implemented here.
-        // To avoid 400 responses, we skip adding discount-only pseudo-lines and rely on product prices already reflecting discounts.
-        if (order.discount_applications?.length > 0) {
-            logger.debug({
-                count: order.discount_applications.length
-            }, 'Detected discount applications on order; skipping standalone discount lines');
-        }
+        // We incorporate Shopify discounts into each line's unit price using total_discount/discount_allocations.
+        // We intentionally avoid sending standalone discount lines to Oblio to keep the payload simple and robust.
 
         // Final sanitation: remove invalid/zero items (Oblio may reject them)
         products = products.filter(p => {
