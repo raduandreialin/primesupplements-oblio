@@ -587,6 +587,13 @@ function App() {
                      min={1}
                    />
                  </InlineStack>
+                 <NumberField
+                   label="Envelopes"
+                   value={parseInt(shippingForm.envelopes) || 0}
+                   onChange={(value) => handleFormChange('envelopes', String(value))}
+                   step={1}
+                   min={0}
+                 />
               </BlockStack>
             </Section>
 
@@ -655,13 +662,6 @@ function App() {
                    label="Observations"
                    value={shippingForm.observations}
                    onChange={(value) => handleFormChange('observations', value)}
-                 />
-                 <NumberField
-                   label="Envelopes"
-                   value={parseInt(shippingForm.envelopes) || 0}
-                   onChange={(value) => handleFormChange('envelopes', String(value))}
-                   step={1}
-                   min={0}
                  />
                </BlockStack>
              </Section>
