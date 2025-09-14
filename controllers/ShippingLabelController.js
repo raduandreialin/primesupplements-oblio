@@ -40,7 +40,10 @@ class ShippingLabelController {
                 morningDelivery,
                 shipmentPayer,
                 observations,
-                envelopes
+                envelopes,
+                orderTotal,
+                orderEmail,
+                orderPhone
             } = req.body;
             
             if (!orderId || !orderNumber) {
@@ -57,19 +60,18 @@ class ShippingLabelController {
             const numericOrderId = orderId.split('/').pop();
             logger.info({ numericOrderId }, 'Extracted numeric order ID');
 
-            // Get Shopify order details
-            logger.info({ numericOrderId }, 'Fetching order from Shopify');
-            const order = await this.shopifyService.getOrder(numericOrderId);
+            // Create a minimal order object from the payload data
+            // We don't need to fetch from Shopify since we have all the data we need
+            const order = {
+                id: numericOrderId,
+                order_number: orderNumber,
+                line_items: [], // We'll use package info instead
+                total_price: orderTotal || insuranceValue || '0',
+                email: orderEmail || customShippingAddress?.email || '',
+                phone: orderPhone || customShippingAddress?.phone || ''
+            };
             
-            if (!order) {
-                logger.error({ numericOrderId }, 'Order not found in Shopify');
-                return res.status(404).json({
-                    success: false,
-                    error: 'Order not found'
-                });
-            }
-            
-            logger.info({ orderId: order.id, orderNumber: order.order_number }, 'Successfully fetched order from Shopify');
+            logger.info({ orderId: order.id, orderNumber: order.order_number }, 'Using order data from extension payload');
 
             // Convert Shopify order to Cargus AWB data with custom package info and address
             logger.info('Converting order to Cargus AWB data');
@@ -328,11 +330,8 @@ class ShippingLabelController {
             throw new Error('No shipping address found');
         }
 
-        // Use custom package weight if provided, otherwise calculate from items
-        const totalWeight = packageInfo?.weight || order.line_items.reduce((sum, item) => {
-            const itemWeight = item.grams ? item.grams / 1000 : 0.5;
-            return sum + (itemWeight * item.quantity);
-        }, 0);
+        // Use custom package weight from payload
+        const totalWeight = packageInfo?.weight || 1.0; // Default to 1kg if not provided
 
         // Map service type to Cargus service ID
         const serviceId = this.mapServiceToCargusId(service, totalWeight);
@@ -371,7 +370,7 @@ class ShippingLabelController {
             morningDelivery: morningDelivery || false,
             shipmentPayer: parseInt(shipmentPayer) || 1,
             observations: observations || `Shopify Order #${order.order_number} - Created via Extension`,
-            packageContent: order.line_items.map(item => item.name).join(', ').substring(0, 100),
+            packageContent: `Order #${order.order_number} - Package`,
             parcelCodes: [{
                 Code: "1",
                 Type: 1,
@@ -379,7 +378,7 @@ class ShippingLabelController {
                 Length: packageInfo?.length || 20,
                 Width: packageInfo?.width || 15,
                 Height: packageInfo?.height || 10,
-                ParcelContent: order.line_items.map(item => item.name).join(', ').substring(0, 50)
+                ParcelContent: `Order #${order.order_number} - Package`
             }]
         };
     }

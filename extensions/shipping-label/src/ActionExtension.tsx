@@ -295,7 +295,11 @@ function App() {
          morningDelivery: shippingForm.morningDelivery,
          shipmentPayer: shippingForm.shipmentPayer,
          observations: shippingForm.observations,
-         envelopes: parseInt(shippingForm.envelopes) || 0
+         envelopes: parseInt(shippingForm.envelopes) || 0,
+         // Additional order data to avoid backend Shopify API calls
+         orderTotal: shippingForm.insuranceValue, // Use insurance value as order total
+         orderEmail: shippingAddress.email || '',
+         orderPhone: shippingAddress.phone || ''
        };
 
 
