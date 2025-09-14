@@ -386,8 +386,8 @@ class ShippingLabelController {
                 CodPostal: address.zip,
                 Email: address.email || order.email
             },
-            parcels: 1,
-            envelopes: envelopes || 0,
+            parcels: 1 + (envelopes || 0), // Total count of all items
+            envelopes: 0, // Set envelopes to 0 and treat everything as parcels
             totalWeight: Math.max(totalWeight, 0.1), // Minimum 0.1kg
             serviceId: serviceId,
             declaredValue: insuranceValue ? parseFloat(insuranceValue) : parseFloat(order.total_price),
@@ -414,11 +414,11 @@ class ShippingLabelController {
                     ParcelContent: `Order #${order.order_number} - Package`
                 });
 
-                // Add separate parcel codes for each envelope using same dimensions from frontend
+                // Add separate parcel codes for each envelope, treating them as parcels (Type 1)
                 for (let i = 0; i < envelopeCount; i++) {
                     parcelCodes.push({
                         Code: String(codeIndex++),
-                        Type: 2, // Type 2 for envelopes
+                        Type: 1, // Type 1 for all items (treat envelopes as parcels)
                         Weight: 0.1, // Minimum weight for envelopes
                         Length: packageInfo?.length || 20, // Use same dimensions from frontend
                         Width: packageInfo?.width || 15,
