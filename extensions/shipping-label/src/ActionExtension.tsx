@@ -592,7 +592,7 @@ function App() {
                    />
                  </InlineStack>
                  <NumberField
-                   label="Envelopes"
+                   label="Envelopes (combined with package)"
                    value={parseInt(shippingForm.envelopes) || 0}
                    onChange={(value) => handleFormChange('envelopes', String(value))}
                    step={1}

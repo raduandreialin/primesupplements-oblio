@@ -386,8 +386,8 @@ class ShippingLabelController {
                 CodPostal: address.zip,
                 Email: address.email || order.email
             },
-            parcels: 1 + (envelopes || 0), // Total count of all items
-            envelopes: 0, // Set envelopes to 0 and treat everything as parcels
+            parcels: 1, // Always use 1 parcel for this service
+            envelopes: 0, // Set to 0 since service doesn't allow multiple parts
             totalWeight: Math.max(totalWeight, 0.1), // Minimum 0.1kg
             serviceId: serviceId,
             declaredValue: insuranceValue ? parseFloat(insuranceValue) : parseFloat(order.total_price),
@@ -398,37 +398,15 @@ class ShippingLabelController {
             shipmentPayer: parseInt(shipmentPayer) || 1,
             observations: observations || `Shopify Order #${order.order_number} - Created via Extension`,
             packageContent: `Order #${order.order_number} - Package`,
-            parcelCodes: (() => {
-                const envelopeCount = Math.max(envelopes || 0, 0);
-                const parcelCodes = [];
-                let codeIndex = 0;
-
-                // Create one parcel code for the main package using dimensions from frontend
-                parcelCodes.push({
-                    Code: String(codeIndex++),
-                    Type: 1, // Type 1 for parcels
-                    Weight: Math.max(totalWeight, 0.1),
-                    Length: packageInfo?.length || 20,
-                    Width: packageInfo?.width || 15,
-                    Height: packageInfo?.height || 10,
-                    ParcelContent: `Order #${order.order_number} - Package`
-                });
-
-                // Add separate parcel codes for each envelope, treating them as parcels (Type 1)
-                for (let i = 0; i < envelopeCount; i++) {
-                    parcelCodes.push({
-                        Code: String(codeIndex++),
-                        Type: 1, // Type 1 for all items (treat envelopes as parcels)
-                        Weight: 0.1, // Minimum weight for envelopes
-                        Length: packageInfo?.length || 20, // Use same dimensions from frontend
-                        Width: packageInfo?.width || 15,
-                        Height: packageInfo?.height || 10,
-                        ParcelContent: `Order #${order.order_number} - Envelope ${i + 1}`
-                    });
-                }
-
-                return parcelCodes;
-            })()
+            parcelCodes: [{
+                Code: "0",
+                Type: 1,
+                Weight: Math.max(totalWeight, 0.1),
+                Length: packageInfo?.length || 20,
+                Width: packageInfo?.width || 15,
+                Height: packageInfo?.height || 10,
+                ParcelContent: `Order #${order.order_number} - Package${(envelopes && envelopes > 0) ? ` + ${envelopes} envelope(s)` : ''}`
+            }]
         };
     }
 
