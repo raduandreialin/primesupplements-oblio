@@ -374,8 +374,6 @@ class InvoiceController {
                   documentNumber: String(order.order_number || order.name || order.id)
               }
             : undefined;
-
-
         
         return {
             cif: companyCif,

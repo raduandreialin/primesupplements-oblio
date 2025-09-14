@@ -1,0 +1,32 @@
+client_id = "c8d278914f206a1bedbb5545a317a9d7"
+name = "primesupplements-actions"
+application_url = "https://shopify.dev/apps/default-app-home"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+dev_store_url = "your-dev-store.myshopify.com"
+
+[access_scopes]
+# https://shopify.dev/docs/api/usage/access-scopes
+scopes = "read_orders,write_orders,read_products"
+
+[auth]
+redirect_urls = [
+  "http://localhost:3000/auth/callback",
+  "http://localhost:3000/auth/shopify/callback",
+]
+
+[webhooks]
+api_version = "2025-01"
+
+[pos]
+embedded = false
+
+[build.include]
+# Include files for the build
+include = ["extensions/**/*"]
+
+[build.exclude]
+# Exclude files from the build
+exclude = ["node_modules/**/*", ".git/**/*"]

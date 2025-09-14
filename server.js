@@ -2,6 +2,7 @@ import express from "express";
 import pinoHttp from 'pino-http';
 import { logger } from './utils/index.js';
 import webhookRoutes from "./routes/webhooks.js";
+import shippingRoutes from "./routes/shipping.js";
 import { captureRawBody } from "./middlewares/verifyShopifyWebhook.js";
 
 const app = express();
@@ -26,6 +27,7 @@ app.use(express.json({ limit: '10mb' }));
 
 // Routes
 app.use('/webhooks', webhookRoutes);
+app.use('/shipping', shippingRoutes);
 
 // Basic health check
 app.get('/', (req, res) => {
@@ -36,5 +38,7 @@ const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, () => {
     logger.info({ port: PORT }, 'Server started');
-    logger.info({ endpoint: `/webhooks/shopify/invoice/create` }, 'Webhook endpoint available');
+    logger.info({ endpoint: `/webhooks/shopify/invoice/create` }, 'Invoice webhook endpoint available');
+    logger.info({ endpoint: `/shipping/create` }, 'Shipping label endpoint available');
+    logger.info({ endpoint: `/shipping/create-label` }, 'Extension shipping label endpoint available (secured)');
 });

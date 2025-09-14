@@ -15,6 +15,12 @@ const config = {
         OBLIO_COMPANY_CIF: process.env.OBLIO_COMPANY_CIF,
         OBLIO_INVOICE_SERIES: process.env.OBLIO_INVOICE_SERIES,
         OBLIO_MANAGEMENT: process.env.OBLIO_MANAGEMENT,
+    },
+    cargus: {
+        baseURL: process.env.CARGUS_BASE_URL || "https://urgentcargus.azure-api.net/api",
+        subscriptionKey: process.env.CARGUS_SUBSCRIPTION_KEY,
+        username: process.env.CARGUS_USERNAME,
+        password: process.env.CARGUS_PASSWORD,
     }
 };
 
