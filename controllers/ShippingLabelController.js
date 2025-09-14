@@ -23,6 +23,8 @@ class ShippingLabelController {
      */
     async createFromExtension(req, res) {
         try {
+            logger.info({ body: req.body }, 'Received shipping label request from extension');
+            
             const { 
                 orderId, 
                 orderNumber, 
@@ -42,49 +44,93 @@ class ShippingLabelController {
             } = req.body;
             
             if (!orderId || !orderNumber) {
+                logger.warn({ orderId, orderNumber }, 'Missing required fields');
                 return res.status(400).json({
                     success: false,
                     error: 'Order ID and order number are required'
                 });
             }
 
-            logger.info({ orderId, orderNumber, carrier, service }, 'Creating shipping label from extension');
+            logger.info({ orderId, orderNumber, carrier, service, packageInfo, customShippingAddress }, 'Creating shipping label from extension');
 
             // Extract numeric order ID from Shopify GID
             const numericOrderId = orderId.split('/').pop();
+            logger.info({ numericOrderId }, 'Extracted numeric order ID');
 
             // Get Shopify order details
+            logger.info({ numericOrderId }, 'Fetching order from Shopify');
             const order = await this.shopifyService.getOrder(numericOrderId);
             
             if (!order) {
+                logger.error({ numericOrderId }, 'Order not found in Shopify');
                 return res.status(404).json({
                     success: false,
                     error: 'Order not found'
                 });
             }
+            
+            logger.info({ orderId: order.id, orderNumber: order.order_number }, 'Successfully fetched order from Shopify');
 
             // Convert Shopify order to Cargus AWB data with custom package info and address
-            const awbData = await this.convertShopifyOrderToAwbWithCustomPackage(
-                order, 
-                packageInfo, 
-                carrier, 
-                service, 
-                customShippingAddress, 
-                codAmount, 
-                insuranceValue,
-                openPackage,
-                saturdayDelivery,
-                morningDelivery,
-                shipmentPayer,
-                observations,
-                envelopes
-            );
+            logger.info('Converting order to Cargus AWB data');
+            let awbData;
+            try {
+                awbData = await this.convertShopifyOrderToAwbWithCustomPackage(
+                    order, 
+                    packageInfo, 
+                    carrier, 
+                    service, 
+                    customShippingAddress, 
+                    codAmount, 
+                    insuranceValue,
+                    openPackage,
+                    saturdayDelivery,
+                    morningDelivery,
+                    shipmentPayer,
+                    observations,
+                    envelopes
+                );
+                logger.info({ awbData }, 'Successfully converted to AWB data');
+            } catch (conversionError) {
+                logger.error({ 
+                    error: conversionError.message, 
+                    stack: conversionError.stack,
+                    orderId: order.id,
+                    packageInfo,
+                    customShippingAddress
+                }, 'Failed to convert order to AWB data');
+                throw conversionError;
+            }
             
             // Create AWB with Cargus
-            const awb = await this.cargusService.createAwbWithPickup(awbData);
+            logger.info('Creating AWB with Cargus');
+            let awb;
+            try {
+                awb = await this.cargusService.createAwbWithPickup(awbData);
+                logger.info({ awb }, 'Successfully created AWB with Cargus');
+            } catch (cargusError) {
+                logger.error({ 
+                    error: cargusError.message, 
+                    stack: cargusError.stack,
+                    awbData
+                }, 'Failed to create AWB with Cargus');
+                throw cargusError;
+            }
             
             // Update Shopify order with shipping info
-            await this.updateShopifyOrderWithShippingInfo(numericOrderId, awb);
+            logger.info('Updating Shopify order with shipping info');
+            try {
+                await this.updateShopifyOrderWithShippingInfo(numericOrderId, awb);
+                logger.info('Successfully updated Shopify order');
+            } catch (updateError) {
+                logger.error({ 
+                    error: updateError.message, 
+                    stack: updateError.stack,
+                    numericOrderId,
+                    awb
+                }, 'Failed to update Shopify order with shipping info');
+                // Don't throw here - we still want to return the AWB data even if Shopify update fails
+            }
 
             logger.info({ 
                 orderId, 
