@@ -92,7 +92,12 @@ class ShippingLabelController {
                     observations,
                     envelopes
                 );
-                logger.info({ awbData }, 'Successfully converted to AWB data');
+                logger.info({ 
+                awbData: {
+                    ...awbData,
+                    parcelCodes: awbData.parcelCodes?.map(pc => ({ Code: pc.Code, Weight: pc.Weight }))
+                }
+            }, 'Successfully converted to AWB data');
             } catch (conversionError) {
                 logger.error({ 
                     error: conversionError.message, 
@@ -359,7 +364,7 @@ class ShippingLabelController {
                 CodPostal: address.zip,
                 Email: address.email || order.email
             },
-            parcels: 1, // Single parcel for extension
+            parcels: Math.max(envelopes || 1, 1), // Number of parcels matches envelopes
             envelopes: envelopes || 0,
             totalWeight: Math.max(totalWeight, 0.1), // Minimum 0.1kg
             serviceId: serviceId,
@@ -371,15 +376,15 @@ class ShippingLabelController {
             shipmentPayer: parseInt(shipmentPayer) || 1,
             observations: observations || `Shopify Order #${order.order_number} - Created via Extension`,
             packageContent: `Order #${order.order_number} - Package`,
-            parcelCodes: [{
-                Code: "1",
+            parcelCodes: Array.from({ length: Math.max(envelopes || 1, 1) }, (_, index) => ({
+                Code: String(index + 1),
                 Type: 1,
-                Weight: Math.max(totalWeight, 0.1),
+                Weight: Math.max(totalWeight / Math.max(envelopes || 1, 1), 0.1), // Distribute weight across envelopes
                 Length: packageInfo?.length || 20,
                 Width: packageInfo?.width || 15,
                 Height: packageInfo?.height || 10,
-                ParcelContent: `Order #${order.order_number} - Package`
-            }]
+                ParcelContent: `Order #${order.order_number} - Package ${index + 1}`
+            }))
         };
     }
 
