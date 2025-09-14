@@ -94,8 +94,15 @@ class ShippingLabelController {
                 );
                 logger.info({ 
                 awbData: {
-                    ...awbData,
-                    parcelCodes: awbData.parcelCodes?.map(pc => ({ Code: pc.Code, Weight: pc.Weight }))
+                    parcels: awbData.parcels,
+                    envelopes: awbData.envelopes,
+                    totalWeight: awbData.totalWeight,
+                    parcelCodes: awbData.parcelCodes?.map(pc => ({ 
+                        Code: pc.Code, 
+                        Weight: pc.Weight, 
+                        Type: pc.Type,
+                        ParcelContent: pc.ParcelContent
+                    }))
                 }
             }, 'Successfully converted to AWB data');
             } catch (conversionError) {
@@ -364,7 +371,10 @@ class ShippingLabelController {
                 CodPostal: address.zip,
                 Email: address.email || order.email
             },
-            parcels: Math.max(envelopes || 1, 1), // Number of parcels matches envelopes
+            parcels: (() => {
+                const envelopeCount = Math.max(envelopes || 0, 0);
+                return envelopeCount > 0 ? envelopeCount : 1;
+            })(), // Number of parcels matches envelopes or defaults to 1
             envelopes: envelopes || 0,
             totalWeight: Math.max(totalWeight, 0.1), // Minimum 0.1kg
             serviceId: serviceId,
@@ -376,15 +386,24 @@ class ShippingLabelController {
             shipmentPayer: parseInt(shipmentPayer) || 1,
             observations: observations || `Shopify Order #${order.order_number} - Created via Extension`,
             packageContent: `Order #${order.order_number} - Package`,
-            parcelCodes: Array.from({ length: Math.max(envelopes || 1, 1) }, (_, index) => ({
-                Code: String(index + 1),
-                Type: 1,
-                Weight: Math.max(totalWeight / Math.max(envelopes || 1, 1), 0.1), // Distribute weight across envelopes
-                Length: packageInfo?.length || 20,
-                Width: packageInfo?.width || 15,
-                Height: packageInfo?.height || 10,
-                ParcelContent: `Order #${order.order_number} - Package ${index + 1}`
-            }))
+            parcelCodes: (() => {
+                // If envelopes > 0, create one parcel code per envelope
+                // If envelopes = 0, create one parcel code for the package
+                const envelopeCount = Math.max(envelopes || 0, 0);
+                const parcelCount = envelopeCount > 0 ? envelopeCount : 1;
+                
+                return Array.from({ length: parcelCount }, (_, index) => ({
+                    Code: String(index), // Start from 0 as per Cargus documentation
+                    Type: 1,
+                    Weight: Math.max(totalWeight / parcelCount, 0.1), // Distribute weight across parcels
+                    Length: packageInfo?.length || 20,
+                    Width: packageInfo?.width || 15,
+                    Height: packageInfo?.height || 10,
+                    ParcelContent: envelopeCount > 0 
+                        ? `Order #${order.order_number} - Envelope ${index + 1}`
+                        : `Order #${order.order_number} - Package`
+                }));
+            })()
         };
     }
 
