@@ -386,7 +386,7 @@ class ShippingLabelController {
                 CodPostal: address.zip,
                 Email: address.email || order.email
             },
-            parcels: 1, // Always 1 parcel for the main package
+            parcels: 1,
             envelopes: envelopes || 0,
             totalWeight: Math.max(totalWeight, 0.1), // Minimum 0.1kg
             serviceId: serviceId,
@@ -402,8 +402,8 @@ class ShippingLabelController {
                 const envelopeCount = Math.max(envelopes || 0, 0);
                 const parcelCodes = [];
                 let codeIndex = 0;
-                
-                // Always create one parcel code for the main package
+
+                // Create one parcel code for the main package using dimensions from frontend
                 parcelCodes.push({
                     Code: String(codeIndex++),
                     Type: 1, // Type 1 for parcels
@@ -413,20 +413,20 @@ class ShippingLabelController {
                     Height: packageInfo?.height || 10,
                     ParcelContent: `Order #${order.order_number} - Package`
                 });
-                
-                // Add parcel codes for each envelope using the same dimensions as the main package
+
+                // Add separate parcel codes for each envelope using same dimensions from frontend
                 for (let i = 0; i < envelopeCount; i++) {
                     parcelCodes.push({
                         Code: String(codeIndex++),
-                        Type: 1, // Type 1 for all items (parcels and envelopes use same type)
+                        Type: 2, // Type 2 for envelopes
                         Weight: 0.1, // Minimum weight for envelopes
-                        Length: packageInfo?.length || 20, // Use same dimensions as main package
+                        Length: packageInfo?.length || 20, // Use same dimensions from frontend
                         Width: packageInfo?.width || 15,
                         Height: packageInfo?.height || 10,
                         ParcelContent: `Order #${order.order_number} - Envelope ${i + 1}`
                     });
                 }
-                
+
                 return parcelCodes;
             })()
         };
