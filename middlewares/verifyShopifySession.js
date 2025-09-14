@@ -7,6 +7,11 @@ import { logger } from '../utils/index.js';
  */
 export const verifyShopifySession = (req, res, next) => {
     try {
+        // Allow OPTIONS requests (CORS preflight) to pass through
+        if (req.method === 'OPTIONS') {
+            return next();
+        }
+        
         // Check if request has basic Shopify identifiers
         const userAgent = req.get('User-Agent') || '';
         const origin = req.get('Origin') || '';

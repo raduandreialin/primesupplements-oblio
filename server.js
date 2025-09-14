@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 import pinoHttp from 'pino-http';
 import { logger } from './utils/index.js';
 import webhookRoutes from "./routes/webhooks.js";
@@ -6,6 +7,19 @@ import shippingRoutes from "./routes/shipping.js";
 import { captureRawBody } from "./middlewares/verifyShopifyWebhook.js";
 
 const app = express();
+
+// CORS configuration for Shopify admin extensions
+app.use(cors({
+  origin: [
+    'https://admin.shopify.com',
+    'https://*.admin.shopify.com',
+    'https://admin.shopify.io',
+    'https://*.admin.shopify.io'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Shopify-Extension', 'User-Agent']
+}));
 
 // Request logging
 app.use(pinoHttp({

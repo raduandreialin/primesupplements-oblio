@@ -302,7 +302,7 @@ function App() {
       // Backend URL
       const backendUrl = 'https://primesupplements-oblio-production.up.railway.app';
         
-      const response = await fetch(`${backendUrl}/api/shipping/create-label`, {
+      const response = await fetch(`${backendUrl}/shipping/create-label`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
