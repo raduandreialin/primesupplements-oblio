@@ -161,18 +161,18 @@ class ShippingLabelController {
                 // Don't throw here - we still want to return the AWB data even if Shopify update fails
             }
 
-            logger.info({ 
-                orderId, 
+            logger.info({
+                orderId,
                 awbBarcode: awb.BarCode,
-                awbId: awb.AwbId 
+                awbId: awb.AwbId || awb.Id || awb.awbId || awb.OrderId || 'N/A'
             }, 'Shipping label created successfully from extension');
 
             res.json({
                 success: true,
                 trackingNumber: awb.BarCode,
                 labelUrl: `https://urgentcargus.ro/tracking-colet/${awb.BarCode}`,
-                cost: awb.Cost || 'N/A',
-                awbId: awb.AwbId,
+                cost: awb.Cost || awb.TotalCost || 'N/A',
+                awbId: awb.AwbId || awb.Id || awb.awbId || awb.OrderId || 'N/A',
                 orderId: orderId
             });
 
@@ -228,10 +228,10 @@ class ShippingLabelController {
             // Update Shopify order with shipping info
             await this.updateShopifyOrderWithShippingInfo(orderId, awb);
 
-            logger.info({ 
-                orderId, 
+            logger.info({
+                orderId,
                 awbBarcode: awb.BarCode,
-                awbId: awb.AwbId 
+                awbId: awb.AwbId || awb.Id || awb.awbId || awb.OrderId || 'N/A'
             }, 'Shipping label created successfully');
 
             res.json({
@@ -448,7 +448,7 @@ class ShippingLabelController {
             {
                 namespace: 'shipping',
                 key: 'awb_id',
-                value: awb.AwbId.toString(),
+                value: (awb.AwbId || awb.Id || awb.awbId || awb.OrderId || 'N/A').toString(),
                 type: 'single_line_text_field'
             },
             {
