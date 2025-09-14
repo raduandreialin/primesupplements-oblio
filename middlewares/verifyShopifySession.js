@@ -20,7 +20,8 @@ export const verifyShopifySession = (req, res, next) => {
         // Specific validation for your Shopify store
         const allowedDomains = [
             'primesupplements1.myshopify.com',
-            'admin.shopify.com'
+            'admin.shopify.com',
+            'extensions.shopifycdn.com'
         ];
         
         const isFromShopifyAdmin = 

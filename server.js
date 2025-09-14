@@ -14,7 +14,9 @@ app.use(cors({
     'https://admin.shopify.com',
     'https://*.admin.shopify.com',
     'https://admin.shopify.io',
-    'https://*.admin.shopify.io'
+    'https://*.admin.shopify.io',
+    'https://extensions.shopifycdn.com',
+    'https://*.extensions.shopifycdn.com'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
