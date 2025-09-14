@@ -373,8 +373,9 @@ class ShippingLabelController {
             },
             parcels: (() => {
                 const envelopeCount = Math.max(envelopes || 0, 0);
+                // Parcels should match the number of parcel codes
                 return envelopeCount > 0 ? envelopeCount : 1;
-            })(), // Number of parcels matches envelopes or defaults to 1
+            })(), // Number of parcels matches envelope count or defaults to 1
             envelopes: envelopes || 0,
             totalWeight: Math.max(totalWeight, 0.1), // Minimum 0.1kg
             serviceId: serviceId,
@@ -387,22 +388,33 @@ class ShippingLabelController {
             observations: observations || `Shopify Order #${order.order_number} - Created via Extension`,
             packageContent: `Order #${order.order_number} - Package`,
             parcelCodes: (() => {
-                // If envelopes > 0, create one parcel code per envelope
-                // If envelopes = 0, create one parcel code for the package
                 const envelopeCount = Math.max(envelopes || 0, 0);
-                const parcelCount = envelopeCount > 0 ? envelopeCount : 1;
                 
-                return Array.from({ length: parcelCount }, (_, index) => ({
-                    Code: String(index), // Start from 0 as per Cargus documentation
-                    Type: 1,
-                    Weight: Math.max(totalWeight / parcelCount, 0.1), // Distribute weight across parcels
-                    Length: packageInfo?.length || 20,
-                    Width: packageInfo?.width || 15,
-                    Height: packageInfo?.height || 10,
-                    ParcelContent: envelopeCount > 0 
-                        ? `Order #${order.order_number} - Envelope ${index + 1}`
-                        : `Order #${order.order_number} - Package`
-                }));
+                // If envelopes > 0, each envelope needs a parcel code
+                // If envelopes = 0, create one parcel code for the package
+                if (envelopeCount > 0) {
+                    // Each envelope is represented by a parcel code
+                    return Array.from({ length: envelopeCount }, (_, index) => ({
+                        Code: String(index), // Start from 0 as per Cargus documentation
+                        Type: 1,
+                        Weight: Math.max(totalWeight / envelopeCount, 0.1), // Distribute weight across envelopes
+                        Length: packageInfo?.length || 20,
+                        Width: packageInfo?.width || 15,
+                        Height: packageInfo?.height || 10,
+                        ParcelContent: `Order #${order.order_number} - Envelope ${index + 1}`
+                    }));
+                } else {
+                    // No envelopes, create one parcel code for the package
+                    return [{
+                        Code: "0",
+                        Type: 1,
+                        Weight: Math.max(totalWeight, 0.1),
+                        Length: packageInfo?.length || 20,
+                        Width: packageInfo?.width || 15,
+                        Height: packageInfo?.height || 10,
+                        ParcelContent: `Order #${order.order_number} - Package`
+                    }];
+                }
             })()
         };
     }
