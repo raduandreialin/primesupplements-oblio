@@ -299,7 +299,7 @@ class ShippingLabelController {
             recipient: {
                 Name: `${address.first_name} ${address.last_name}`,
                 CountyName: this.mapProvinceToCounty(address.province),
-                LocalityName: address.city,
+                LocalityName: await this.validateAndMapLocality(address.city, this.mapProvinceToCounty(address.province)),
                 AddressText: `${address.address1} ${address.address2 || ''}`.trim(),
                 ContactPerson: `${address.first_name} ${address.last_name}`,
                 PhoneNumber: address.phone || order.phone || "0700000000",
@@ -379,7 +379,7 @@ class ShippingLabelController {
             recipient: {
                 Name: `${address.firstName || address.first_name} ${address.lastName || address.last_name}`,
                 CountyName: this.mapProvinceToCounty(address.province),
-                LocalityName: address.city,
+                LocalityName: await this.validateAndMapLocality(address.city, this.mapProvinceToCounty(address.province)),
                 AddressText: `${address.address1} ${address.address2 || ''}`.trim(),
                 ContactPerson: `${address.firstName || address.first_name} ${address.lastName || address.last_name}`,
                 PhoneNumber: address.phone || order.phone || "0700000000",
@@ -545,6 +545,67 @@ class ShippingLabelController {
         tomorrow.setDate(tomorrow.getDate() + 1);
         tomorrow.setHours(17, 0, 0, 0);
         return tomorrow.toISOString().slice(0, 16); // Format: YYYY-MM-DDTHH:mm
+    }
+
+    /**
+     * Validate and map locality name against Cargus database
+     * @param {string} cityName - City name from address
+     * @param {string} countyName - County name
+     * @returns {Promise<string>} Validated locality name
+     */
+    async validateAndMapLocality(cityName, countyName) {
+        if (!cityName) {
+            throw new Error('City name is required');
+        }
+
+        try {
+            // First, try to get the county ID for the county name
+            const countries = await this.cargusService.getCountries();
+            const romania = countries.find(c => c.Abbreviation === 'RO' || c.CountryName === 'Romania');
+
+            if (!romania) {
+                logger.warn('Romania not found in countries list, using default locality');
+                return cityName; // Fallback to original city name
+            }
+
+            const counties = await this.cargusService.getCounties(romania.CountryId);
+            const county = counties.find(c =>
+                c.Name === countyName ||
+                c.Abbreviation === countyName ||
+                c.Name.toLowerCase() === countyName.toLowerCase()
+            );
+
+            if (!county) {
+                logger.warn({ cityName, countyName }, 'County not found, using original city name');
+                return cityName;
+            }
+
+            // Get localities for this county
+            const localities = await this.cargusService.getLocalities(romania.CountryId, county.CountyId);
+
+            // Try exact match first
+            let locality = localities.find(l => l.Name.toLowerCase() === cityName.toLowerCase());
+
+            // If no exact match, try partial match
+            if (!locality) {
+                locality = localities.find(l =>
+                    l.Name.toLowerCase().includes(cityName.toLowerCase()) ||
+                    cityName.toLowerCase().includes(l.Name.toLowerCase())
+                );
+            }
+
+            if (locality) {
+                logger.info({ originalCity: cityName, mappedCity: locality.Name }, 'Successfully mapped locality');
+                return locality.Name;
+            } else {
+                logger.warn({ cityName, countyName, availableLocalities: localities.slice(0, 5).map(l => l.Name) }, 'Locality not found in Cargus database, using original name');
+                return cityName;
+            }
+
+        } catch (error) {
+            logger.error({ error: error.message, cityName, countyName }, 'Failed to validate locality, using original name');
+            return cityName; // Fallback to original city name
+        }
     }
 
 }
