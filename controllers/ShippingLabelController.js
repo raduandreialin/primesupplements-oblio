@@ -123,7 +123,15 @@ class ShippingLabelController {
             let awb;
             try {
                 awb = await this.cargusService.createAwbWithPickup(awbData);
-                logger.info({ awb }, 'Successfully created AWB with Cargus');
+                logger.info({
+                    awbResponse: awb,
+                    awbKeys: Object.keys(awb || {}),
+                    awbType: typeof awb,
+                    awbStringified: JSON.stringify(awb),
+                    barCode: awb?.BarCode,
+                    cost: awb?.Cost,
+                    totalCost: awb?.TotalCost
+                }, 'AWB Creation Response Debug');
             } catch (cargusError) {
                 logger.error({ 
                     error: cargusError.message, 
@@ -149,11 +157,27 @@ class ShippingLabelController {
             // Update Shopify order with shipping info
             logger.info('Updating Shopify order with shipping info');
             try {
-                await this.updateShopifyOrderWithShippingInfo(numericOrderId, awb);
+                const additionalData = {
+                    weight: totalWeight,
+                    length: packageInfo?.length,
+                    width: packageInfo?.width,
+                    height: packageInfo?.height,
+                    service: service,
+                    codAmount: codAmount,
+                    insuranceValue: insuranceValue,
+                    envelopes: envelopes,
+                    openPackage: openPackage,
+                    saturdayDelivery: saturdayDelivery,
+                    morningDelivery: morningDelivery,
+                    shipmentPayer: shipmentPayer,
+                    observations: observations
+                };
+
+                await this.updateShopifyOrderWithShippingInfo(numericOrderId, awb, additionalData);
                 logger.info('Successfully updated Shopify order');
             } catch (updateError) {
-                logger.error({ 
-                    error: updateError.message, 
+                logger.error({
+                    error: updateError.message,
                     stack: updateError.stack,
                     numericOrderId,
                     awb
@@ -161,20 +185,31 @@ class ShippingLabelController {
                 // Don't throw here - we still want to return the AWB data even if Shopify update fails
             }
 
+            const responseData = {
+                success: true,
+                trackingNumber: awb.BarCode || 'N/A',
+                labelUrl: `https://urgentcargus.ro/tracking-colet/${awb.BarCode || 'N/A'}`,
+                cost: awb.Cost || awb.TotalCost || awb.GrandTotal || awb.Price || awb.Total || awb.Amount || 'Contact courier for pricing',
+                awbId: awb.AwbId || awb.Id || awb.awbId || awb.OrderId || awb.TrackingId || 'Generated',
+                orderId: orderId
+            };
+
             logger.info({
                 orderId,
                 awbBarcode: awb.BarCode,
-                awbId: awb.AwbId || awb.Id || awb.awbId || awb.OrderId || 'N/A'
-            }, 'Shipping label created successfully from extension');
-
-            res.json({
-                success: true,
-                trackingNumber: awb.BarCode,
-                labelUrl: `https://urgentcargus.ro/tracking-colet/${awb.BarCode}`,
-                cost: awb.Cost || awb.TotalCost || 'N/A',
                 awbId: awb.AwbId || awb.Id || awb.awbId || awb.OrderId || 'N/A',
-                orderId: orderId
-            });
+                responseToFrontend: responseData,
+                rawAwbFields: {
+                    BarCode: awb.BarCode,
+                    Cost: awb.Cost,
+                    TotalCost: awb.TotalCost,
+                    GrandTotal: awb.GrandTotal,
+                    AwbId: awb.AwbId,
+                    Id: awb.Id
+                }
+            }, 'Shipping label created successfully - Response Debug');
+
+            res.json(responseData);
 
         } catch (error) {
             logger.error({ 
@@ -437,12 +472,14 @@ class ShippingLabelController {
      * @param {string} orderId - Shopify order ID
      * @param {Object} awb - Cargus AWB response
      */
-    async updateShopifyOrderWithShippingInfo(orderId, awb) {
+    async updateShopifyOrderWithShippingInfo(orderId, awb, additionalData = {}) {
+        const currentDate = new Date().toISOString();
+
         const metafields = [
             {
                 namespace: 'shipping',
                 key: 'awb_barcode',
-                value: awb.BarCode,
+                value: awb.BarCode || 'N/A',
                 type: 'single_line_text_field'
             },
             {
@@ -454,7 +491,7 @@ class ShippingLabelController {
             {
                 namespace: 'shipping',
                 key: 'tracking_url',
-                value: `https://urgentcargus.ro/tracking-colet/${awb.BarCode}`,
+                value: `https://urgentcargus.ro/tracking-colet/${awb.BarCode || 'N/A'}`,
                 type: 'url'
             },
             {
@@ -462,13 +499,107 @@ class ShippingLabelController {
                 key: 'courier_service',
                 value: 'Cargus',
                 type: 'single_line_text_field'
+            },
+            {
+                namespace: 'shipping',
+                key: 'label_created_at',
+                value: currentDate,
+                type: 'date_time'
+            },
+            {
+                namespace: 'shipping',
+                key: 'shipping_cost',
+                value: (awb.Cost || awb.TotalCost || 0).toString(),
+                type: 'number_decimal'
+            },
+            {
+                namespace: 'shipping_details',
+                key: 'package_weight',
+                value: (additionalData.weight || 0).toString(),
+                type: 'number_decimal'
+            },
+            {
+                namespace: 'shipping_details',
+                key: 'package_dimensions',
+                value: `${additionalData.length || 0}x${additionalData.width || 0}x${additionalData.height || 0}cm`,
+                type: 'single_line_text_field'
+            },
+            {
+                namespace: 'shipping_details',
+                key: 'service_type',
+                value: additionalData.service || 'standard',
+                type: 'single_line_text_field'
+            },
+            {
+                namespace: 'shipping_details',
+                key: 'cod_amount',
+                value: (additionalData.codAmount || 0).toString(),
+                type: 'number_decimal'
+            },
+            {
+                namespace: 'shipping_details',
+                key: 'insurance_value',
+                value: (additionalData.insuranceValue || 0).toString(),
+                type: 'number_decimal'
+            },
+            {
+                namespace: 'shipping_details',
+                key: 'envelope_count',
+                value: (additionalData.envelopes || 0).toString(),
+                type: 'number_integer'
+            },
+            {
+                namespace: 'shipping_options',
+                key: 'open_package',
+                value: (additionalData.openPackage || false).toString(),
+                type: 'boolean'
+            },
+            {
+                namespace: 'shipping_options',
+                key: 'saturday_delivery',
+                value: (additionalData.saturdayDelivery || false).toString(),
+                type: 'boolean'
+            },
+            {
+                namespace: 'shipping_options',
+                key: 'morning_delivery',
+                value: (additionalData.morningDelivery || false).toString(),
+                type: 'boolean'
+            },
+            {
+                namespace: 'shipping_options',
+                key: 'shipment_payer',
+                value: (additionalData.shipmentPayer || 1).toString(),
+                type: 'single_line_text_field'
+            },
+            {
+                namespace: 'shipping_notes',
+                key: 'observations',
+                value: additionalData.observations || '',
+                type: 'multi_line_text_field'
+            },
+            {
+                namespace: 'shipping_raw',
+                key: 'cargus_response',
+                value: JSON.stringify(awb),
+                type: 'json'
             }
         ];
 
         await this.shopifyService.updateOrderMetafields(orderId, metafields);
-        
-        // Add shipping tag
-        await this.shopifyService.tagOrder(orderId, 'SHIPPING_LABEL_CREATED');
+
+        // Add multiple tags for better organization
+        const tags = ['SHIPPING_LABEL_CREATED', 'CARGUS_SHIPMENT'];
+        if (additionalData.codAmount && parseFloat(additionalData.codAmount) > 0) {
+            tags.push('COD_SHIPMENT');
+        }
+        if (additionalData.envelopes && parseInt(additionalData.envelopes) > 0) {
+            tags.push('MULTI_PACKAGE');
+        }
+
+        for (const tag of tags) {
+            await this.shopifyService.tagOrder(orderId, tag);
+        }
     }
 
     /**

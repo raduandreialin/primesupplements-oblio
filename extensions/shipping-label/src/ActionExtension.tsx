@@ -523,7 +523,11 @@ function App() {
               <Text fontWeight="bold">Label created successfully</Text>
               <InlineStack gap="base">
                 <Text>Tracking: <Text fontWeight="bold">{labelResult.trackingNumber || 'N/A'}</Text></Text>
-                <Text>Cost: <Text fontWeight="bold">${labelResult.cost || 'N/A'}</Text></Text>
+                <Text>Cost: <Text fontWeight="bold">{
+                  labelResult.cost && labelResult.cost !== 'N/A' && labelResult.cost !== 'Contact courier for pricing'
+                    ? `${labelResult.cost} RON`
+                    : labelResult.cost || 'Contact courier'
+                }</Text></Text>
               </InlineStack>
             </BlockStack>
           </Banner>
