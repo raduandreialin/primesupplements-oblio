@@ -97,6 +97,8 @@ class ShippingLabelController {
                     parcels: awbData.parcels,
                     envelopes: awbData.envelopes,
                     totalWeight: awbData.totalWeight,
+                    parcelCodesCount: awbData.parcelCodes?.length,
+                    expectedParcelCodes: awbData.parcels + awbData.envelopes,
                     parcelCodes: awbData.parcelCodes?.map(pc => ({ 
                         Code: pc.Code, 
                         Weight: pc.Weight, 
@@ -104,7 +106,7 @@ class ShippingLabelController {
                         ParcelContent: pc.ParcelContent
                     }))
                 }
-            }, 'Successfully converted to AWB data');
+            }, 'Successfully converted to AWB data - parcelCodes should equal parcels + envelopes');
             } catch (conversionError) {
                 logger.error({ 
                     error: conversionError.message, 
@@ -126,8 +128,21 @@ class ShippingLabelController {
                 logger.error({ 
                     error: cargusError.message, 
                     stack: cargusError.stack,
-                    awbData
-                }, 'Failed to create AWB with Cargus');
+                    statusCode: cargusError.response?.status,
+                    responseData: cargusError.response?.data,
+                    awbDataSummary: {
+                        parcels: awbData.parcels,
+                        envelopes: awbData.envelopes,
+                        totalWeight: awbData.totalWeight,
+                        parcelCodesCount: awbData.parcelCodes?.length,
+                        serviceId: awbData.serviceId,
+                        recipient: {
+                            name: awbData.recipient?.Name,
+                            county: awbData.recipient?.CountyName,
+                            city: awbData.recipient?.LocalityName
+                        }
+                    }
+                }, 'Failed to create AWB with Cargus - detailed error info');
                 throw cargusError;
             }
             
@@ -272,14 +287,14 @@ class ShippingLabelController {
             pickupStartDate: this.getDefaultPickupStart(),
             pickupEndDate: this.getDefaultPickupEnd(),
             sender: {
-                Name: "Your Company Name", // Configure this
-                CountyName: "Bucuresti", // Configure this
-                LocalityName: "Bucuresti", // Configure this
-                AddressText: "Your Company Address", // Configure this
-                ContactPerson: "Contact Person", // Configure this
-                PhoneNumber: "0723000000", // Configure this
-                CodPostal: "010101", // Configure this
-                Email: "contact@yourcompany.com" // Configure this
+                Name: config.cargus.sender.name,
+                CountyName: config.cargus.sender.countyName,
+                LocalityName: config.cargus.sender.localityName,
+                AddressText: config.cargus.sender.addressText,
+                ContactPerson: config.cargus.sender.contactPerson,
+                PhoneNumber: config.cargus.sender.phoneNumber,
+                CodPostal: config.cargus.sender.postalCode,
+                Email: config.cargus.sender.email
             },
             recipient: {
                 Name: `${address.first_name} ${address.last_name}`,
@@ -352,14 +367,14 @@ class ShippingLabelController {
             pickupStartDate: this.getDefaultPickupStart(),
             pickupEndDate: this.getDefaultPickupEnd(),
             sender: {
-                Name: "Prime Supplements", // Configure this
-                CountyName: "Bucuresti", // Configure this
-                LocalityName: "Bucuresti", // Configure this
-                AddressText: "Your Company Address", // Configure this
-                ContactPerson: "Contact Person", // Configure this
-                PhoneNumber: "0723000000", // Configure this
-                CodPostal: "010101", // Configure this
-                Email: "contact@primesupplements.ro" // Configure this
+                Name: config.cargus.sender.name,
+                CountyName: config.cargus.sender.countyName,
+                LocalityName: config.cargus.sender.localityName,
+                AddressText: config.cargus.sender.addressText,
+                ContactPerson: config.cargus.sender.contactPerson,
+                PhoneNumber: config.cargus.sender.phoneNumber,
+                CodPostal: config.cargus.sender.postalCode,
+                Email: config.cargus.sender.email
             },
             recipient: {
                 Name: `${address.firstName || address.first_name} ${address.lastName || address.last_name}`,
@@ -371,11 +386,7 @@ class ShippingLabelController {
                 CodPostal: address.zip,
                 Email: address.email || order.email
             },
-            parcels: (() => {
-                const envelopeCount = Math.max(envelopes || 0, 0);
-                // Parcels should match the number of parcel codes
-                return envelopeCount > 0 ? envelopeCount : 1;
-            })(), // Number of parcels matches envelope count or defaults to 1
+            parcels: 1, // Always 1 parcel for the main package
             envelopes: envelopes || 0,
             totalWeight: Math.max(totalWeight, 0.1), // Minimum 0.1kg
             serviceId: serviceId,
@@ -389,32 +400,34 @@ class ShippingLabelController {
             packageContent: `Order #${order.order_number} - Package`,
             parcelCodes: (() => {
                 const envelopeCount = Math.max(envelopes || 0, 0);
+                const parcelCodes = [];
+                let codeIndex = 0;
                 
-                // If envelopes > 0, each envelope needs a parcel code
-                // If envelopes = 0, create one parcel code for the package
-                if (envelopeCount > 0) {
-                    // Each envelope is represented by a parcel code
-                    return Array.from({ length: envelopeCount }, (_, index) => ({
-                        Code: String(index), // Start from 0 as per Cargus documentation
-                        Type: 1,
-                        Weight: Math.max(totalWeight / envelopeCount, 0.1), // Distribute weight across envelopes
-                        Length: packageInfo?.length || 20,
+                // Always create one parcel code for the main package
+                parcelCodes.push({
+                    Code: String(codeIndex++),
+                    Type: 1, // Type 1 for parcels
+                    Weight: Math.max(totalWeight, 0.1),
+                    Length: packageInfo?.length || 20,
+                    Width: packageInfo?.width || 15,
+                    Height: packageInfo?.height || 10,
+                    ParcelContent: `Order #${order.order_number} - Package`
+                });
+                
+                // Add parcel codes for each envelope using the same dimensions as the main package
+                for (let i = 0; i < envelopeCount; i++) {
+                    parcelCodes.push({
+                        Code: String(codeIndex++),
+                        Type: 1, // Type 1 for all items (parcels and envelopes use same type)
+                        Weight: 0.1, // Minimum weight for envelopes
+                        Length: packageInfo?.length || 20, // Use same dimensions as main package
                         Width: packageInfo?.width || 15,
                         Height: packageInfo?.height || 10,
-                        ParcelContent: `Order #${order.order_number} - Envelope ${index + 1}`
-                    }));
-                } else {
-                    // No envelopes, create one parcel code for the package
-                    return [{
-                        Code: "0",
-                        Type: 1,
-                        Weight: Math.max(totalWeight, 0.1),
-                        Length: packageInfo?.length || 20,
-                        Width: packageInfo?.width || 15,
-                        Height: packageInfo?.height || 10,
-                        ParcelContent: `Order #${order.order_number} - Package`
-                    }];
+                        ParcelContent: `Order #${order.order_number} - Envelope ${i + 1}`
+                    });
                 }
+                
+                return parcelCodes;
             })()
         };
     }
