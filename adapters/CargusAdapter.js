@@ -54,6 +54,9 @@ class CargusAdapter extends BaseAdapter {
         // Map service type to Cargus service ID
         const serviceId = this.mapServiceToCargusId(service, totalWeight);
 
+        // Map the county name once to ensure consistency
+        const mappedCounty = this.mapProvinceToCounty(address.province);
+
         return {
             pickupStartDate: this.getDefaultPickupStart(),
             pickupEndDate: this.getDefaultPickupEnd(),
@@ -69,8 +72,8 @@ class CargusAdapter extends BaseAdapter {
             },
             recipient: {
                 Name: `${address.firstName || address.first_name} ${address.lastName || address.last_name}`,
-                CountyName: this.mapProvinceToCounty(address.province),
-                LocalityName: await this.validateAndMapLocality(address.city, this.mapProvinceToCounty(address.province)),
+                CountyName: mappedCounty,
+                LocalityName: await this.validateAndMapLocality(address.city, mappedCounty),
                 AddressText: `${address.address1} ${address.address2 || ''}`.trim(),
                 ContactPerson: `${address.firstName || address.first_name} ${address.lastName || address.last_name}`,
                 PhoneNumber: address.phone || order.phone || "0700000000",
@@ -196,52 +199,103 @@ class CargusAdapter extends BaseAdapter {
      * @returns {string} Romanian county name
      */
     mapProvinceToCounty(province) {
+        if (!province) return 'Bucuresti';
+
+        // Normalize the province name first (remove diacritics, etc.)
+        const normalizedProvince = this.normalizeLocalityName(province);
+        
         const mapping = {
-            'Bucuresti': 'Bucuresti',
-            'Alba': 'Alba',
-            'Arad': 'Arad',
-            'Arges': 'Arges',
-            'Bacau': 'Bacau',
-            'Bihor': 'Bihor',
-            'Bistrita-Nasaud': 'Bistrita-Nasaud',
-            'Botosani': 'Botosani',
-            'Braila': 'Braila',
-            'Brasov': 'Brasov',
-            'Buzau': 'Buzau',
-            'Calarasi': 'Calarasi',
-            'Caras-Severin': 'Caras-Severin',
-            'Cluj': 'Cluj',
-            'Constanta': 'Constanta',
-            'Covasna': 'Covasna',
-            'Dambovita': 'Dambovita',
-            'Dolj': 'Dolj',
-            'Galati': 'Galati',
-            'Giurgiu': 'Giurgiu',
-            'Gorj': 'Gorj',
-            'Harghita': 'Harghita',
-            'Hunedoara': 'Hunedoara',
-            'Ialomita': 'Ialomita',
-            'Iasi': 'Iasi',
-            'Ilfov': 'Ilfov',
-            'Maramures': 'Maramures',
-            'Mehedinti': 'Mehedinti',
-            'Mures': 'Mures',
-            'Neamt': 'Neamt',
-            'Olt': 'Olt',
-            'Prahova': 'Prahova',
-            'Salaj': 'Salaj',
-            'Satu-Mare': 'Satu-Mare',
-            'Sibiu': 'Sibiu',
-            'Suceava': 'Suceava',
-            'Teleorman': 'Teleorman',
-            'Timis': 'Timis',
-            'Tulcea': 'Tulcea',
-            'Valcea': 'Valcea',
-            'Vaslui': 'Vaslui',
-            'Vrancea': 'Vrancea'
+            // Standard mappings
+            'bucuresti': 'Bucuresti',
+            'alba': 'Alba',
+            'arad': 'Arad',
+            'arges': 'Arges',
+            'bacau': 'Bacau',
+            'bihor': 'Bihor',
+            'bistrita-nasaud': 'Bistrita-Nasaud',
+            'botosani': 'Botosani',
+            'braila': 'Braila',
+            'brasov': 'Brasov',
+            'buzau': 'Buzau',
+            'calarasi': 'Calarasi',
+            'caras-severin': 'Caras-Severin',
+            'cluj': 'Cluj',
+            'constanta': 'Constanta',
+            'covasna': 'Covasna',
+            'dambovita': 'Dambovita',
+            'dolj': 'Dolj',
+            'galati': 'Galati',
+            'giurgiu': 'Giurgiu',
+            'gorj': 'Gorj',
+            'harghita': 'Harghita',
+            'hunedoara': 'Hunedoara',
+            'ialomita': 'Ialomita',
+            'iasi': 'Iasi',
+            'ilfov': 'Ilfov',
+            'maramures': 'Maramures',
+            'mehedinti': 'Mehedinti',
+            'mures': 'Mures',
+            'neamt': 'Neamt',
+            'olt': 'Olt',
+            'prahova': 'Prahova',
+            'salaj': 'Salaj',
+            'satu-mare': 'Satu Mare',
+            'sibiu': 'Sibiu',
+            'suceava': 'Suceava',
+            'teleorman': 'Teleorman',
+            'timis': 'Timis',
+            'tulcea': 'Tulcea',
+            'valcea': 'Valcea',
+            'vaslui': 'Vaslui',
+            'vrancea': 'Vrancea',
+            
+            // Common variations with diacritics
+            'brasov': 'Brasov', // Brașov -> Brasov
+            'timisoara': 'Timis', // Timișoara -> Timis
+            'cluj-napoca': 'Cluj', // Cluj-Napoca -> Cluj
+            'targu-mures': 'Mures', // Târgu-Mureș -> Mures
+            'satu mare': 'Satu Mare', // Handle both hyphen and space
+            
+            // English variations
+            'bucharest': 'Bucuresti',
+            'transylvania': 'Cluj', // Common mistake
         };
 
-        return mapping[province] || province || 'Bucuresti';
+        // Try normalized mapping first
+        const mapped = mapping[normalizedProvince];
+        if (mapped) {
+            logger.info({ originalProvince: province, normalizedProvince, mappedCounty: mapped }, 'County mapped successfully');
+            return mapped;
+        }
+
+        // If no mapping found, try exact match with available counties
+        const availableCounties = [
+            'Alba', 'Arad', 'Arges', 'Bacau', 'Bihor', 'Bistrita-Nasaud', 
+            'Botosani', 'Braila', 'Brasov', 'Buzau', 'Calarasi', 'Caras-Severin', 
+            'Cluj', 'Constanta', 'Covasna', 'Dambovita', 'Dolj', 'Galati', 
+            'Giurgiu', 'Gorj', 'Harghita', 'Hunedoara', 'Ialomita', 'Iasi', 
+            'Ilfov', 'Maramures', 'Mehedinti', 'Mures', 'Neamt', 'Olt', 
+            'Prahova', 'Salaj', 'Satu Mare', 'Sibiu', 'Suceava', 'Teleorman', 
+            'Timis', 'Tulcea', 'Valcea', 'Vaslui', 'Vrancea', 'Bucuresti'
+        ];
+
+        // Try to find exact match in available counties
+        const exactMatch = availableCounties.find(county => 
+            this.normalizeLocalityName(county) === normalizedProvince
+        );
+
+        if (exactMatch) {
+            logger.info({ originalProvince: province, foundCounty: exactMatch }, 'County found by exact match');
+            return exactMatch;
+        }
+
+        logger.warn({ 
+            originalProvince: province, 
+            normalizedProvince, 
+            availableCounties: availableCounties.slice(0, 10) 
+        }, 'County not found, using Bucuresti as fallback');
+        
+        return 'Bucuresti'; // Safe fallback
     }
 
     /**

@@ -19,6 +19,18 @@ import {
   Checkbox
 } from '@shopify/ui-extensions-react/admin';
 
+import {
+  normalizeRomanianCounty,
+  normalizeRomanianCity,
+  validateShippingAddress,
+  getFieldDisplayName,
+  calculateTotalWeight,
+  calculateCODAmount,
+  getOrderStatusBadge,
+  handleApiError,
+  makeApiRequest
+} from './utils';
+
 // The target used here must match the target used in the extension's toml file (./shopify.extension.toml)
 const TARGET = 'admin.order-details.action.render';
 
@@ -275,6 +287,14 @@ function App() {
       setIsFulfillingOrder(true);
       setError('');
 
+      // Pre-process shipping address to normalize Romanian addresses
+      const normalizedAddress = {
+        ...shippingAddress,
+        // Normalize common Romanian county names
+        province: normalizeRomanianCounty(shippingAddress.province),
+        city: normalizeRomanianCity(shippingAddress.city)
+      };
+
       const fulfillmentData = {
         orderId: orderInfo.id,
         orderNumber: orderInfo.orderNumber,
@@ -288,7 +308,7 @@ function App() {
         },
         insurance: shippingForm.insurance,
         insuranceValue: shippingForm.insuranceValue,
-        customShippingAddress: shippingAddress,
+        customShippingAddress: normalizedAddress,
         codAmount: shippingForm.codAmount,
         openPackage: shippingForm.openPackage,
         saturdayDelivery: shippingForm.saturdayDelivery,
@@ -297,17 +317,15 @@ function App() {
         observations: shippingForm.observations,
         envelopes: parseInt(shippingForm.envelopes) || 0,
         orderTotal: shippingForm.insuranceValue, // Use insurance value as order total
-        orderEmail: shippingAddress.email,
-        orderPhone: shippingAddress.phone,
+        orderEmail: normalizedAddress.email,
+        orderPhone: normalizedAddress.phone,
         notifyCustomer: true
       };
 
       // Backend URL
       const backendUrl = 'https://primesupplements-oblio-production.up.railway.app';
         
-      console.log('Sending fulfillment request:', fulfillmentData);
-
-      const response = await fetch(`${backendUrl}/shipping/fulfillment/create/cargus`, {
+      const result = await makeApiRequest(`${backendUrl}/shipping/fulfillment/create/cargus`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -317,58 +335,13 @@ function App() {
         body: JSON.stringify(fulfillmentData)
       });
 
-      console.log('Response status:', response.status, response.statusText);
-
-      if (!response.ok) {
-        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-        
-        try {
-          const errorData = await response.json();
-          console.log('Error response data:', errorData);
-          
-          if (errorData.error) {
-            errorMessage = errorData.error;
-          } else if (errorData.details) {
-            errorMessage = errorData.details;
-          } else if (errorData.message) {
-            errorMessage = errorData.message;
-          }
-        } catch (jsonError) {
-          console.log('Could not parse error response as JSON');
-          // Use the original statusText if JSON parsing fails
-        }
-        
-        throw new Error(errorMessage);
-      }
-
-      const result = await response.json();
-      console.log('Success response:', result);
-
       setLabelResult(result);
       setShowForm(false);
       
     } catch (error) {
       console.error('Fulfillment error:', error);
       
-      let userFriendlyMessage = error.message;
-      
-      // Handle common network errors
-      if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-        userFriendlyMessage = 'Network error: Cannot reach the server. Please check your internet connection.';
-      } else if (error.message.includes('timeout')) {
-        userFriendlyMessage = 'Request timeout: The server is taking too long to respond.';
-      } else if (error.message.includes('CORS')) {
-        userFriendlyMessage = 'CORS error: Cross-origin request blocked.';
-      } else if (error.message.includes('HTTP 401')) {
-        userFriendlyMessage = 'Authentication error: Invalid credentials.';
-      } else if (error.message.includes('HTTP 403')) {
-        userFriendlyMessage = 'Permission error: Access denied.';
-      } else if (error.message.includes('HTTP 404')) {
-        userFriendlyMessage = 'Endpoint not found: The fulfillment service is not available.';
-      } else if (error.message.includes('HTTP 500')) {
-        userFriendlyMessage = 'Server error: Internal server error occurred.';
-      }
-      
+      const userFriendlyMessage = handleApiError(error);
       setError(`Failed to fulfill order with Cargus: ${userFriendlyMessage}`);
     } finally {
       setIsFulfillingOrder(false);
@@ -384,138 +357,10 @@ function App() {
    };
 
 
-  // Function to calculate total weight from line items
-  const calculateTotalWeight = (lineItems: any) => {
-    if (!lineItems || !lineItems.edges) {
-      return 1; // Default weight in kg
-    }
 
-    let totalWeightGrams = 0;
-    
-    lineItems.edges.forEach(edge => {
-      const item = edge.node;
-      const quantity = item.quantity || 1;
-      const variant = item.variant;
-      
-      if (variant && variant.inventoryItem?.measurement?.weight) {
-        const weight = variant.inventoryItem.measurement.weight;
-        let weightInGrams = weight.value;
-        
-        // Convert weight to grams based on weight unit
-        switch (weight.unit?.toLowerCase()) {
-          case 'kilograms':
-          case 'kg':
-            weightInGrams = weight.value * 1000;
-            break;
-          case 'pounds':
-          case 'lb':
-            weightInGrams = weight.value * 453.592;
-            break;
-          case 'ounces':
-          case 'oz':
-            weightInGrams = weight.value * 28.3495;
-            break;
-          case 'grams':
-          case 'g':
-          default:
-            weightInGrams = weight.value;
-            break;
-        }
-        
-        totalWeightGrams += weightInGrams * quantity;
-        
-      } else {
-        // Fallback weight if no weight data available (0.5kg = 500g)
-        const fallbackWeight = 500;
-        totalWeightGrams += fallbackWeight * quantity;
-        
-      }
-    });
 
-    // Convert total weight back to kg and round to 2 decimal places
-    const totalWeightKg = Math.max(0.1, totalWeightGrams / 1000); // Minimum 0.1kg
-    
-    
-    return totalWeightKg.toFixed(2).toString();
-  };
 
-  // Function to get order status badge properties
-  const getOrderStatusBadge = (order: any) => {
-    if (!order) return { text: 'Unknown', tone: undefined };
-    
-    const status = order.displayFinancialStatus?.toLowerCase();
-    
-    switch (status) {
-      case 'paid':
-        return { text: 'Paid', tone: 'success' };
-      case 'pending':
-        return { text: 'Pending Payment', tone: 'attention' };
-      case 'partially_paid':
-        return { text: 'Partially Paid', tone: 'caution' };
-      case 'refunded':
-        return { text: 'Refunded', tone: 'info' };
-      case 'partially_refunded':
-        return { text: 'Partially Refunded', tone: 'info' };
-      case 'voided':
-        return { text: 'Voided', tone: 'critical' };
-      default:
-        return { text: status || 'Unknown', tone: undefined };
-    }
-  };
 
-  // Function to validate shipping address
-  const validateShippingAddress = (address) => {
-    const requiredFields = ['firstName', 'lastName', 'address1', 'city', 'province', 'zip', 'country'];
-    const missingFields = [];
-    
-    requiredFields.forEach(field => {
-      if (!address[field] || address[field].trim() === '') {
-        missingFields.push(field);
-      }
-    });
-    
-    return {
-      isValid: missingFields.length === 0,
-      missingFields: missingFields
-    };
-  };
-
-  // Function to get field display name
-  const getFieldDisplayName = (field) => {
-    const fieldNames = {
-      firstName: 'First Name',
-      lastName: 'Last Name',
-      address1: 'Address Line 1',
-      city: 'City',
-      province: 'Province/State',
-      zip: 'Postal Code',
-      country: 'Country'
-    };
-    return fieldNames[field] || field;
-  };
-
-  // Function to calculate Cash on Delivery amount
-  const calculateCODAmount = (order: any) => {
-    if (!order) {
-      return '0';
-    }
-
-    const displayFinancialStatus = order.displayFinancialStatus?.toLowerCase();
-
-    // If order is fully paid, COD should be 0
-    if (displayFinancialStatus === 'paid') {
-      return '0';
-    }
-
-    // Get order total and amount received
-    const totalAmount = parseFloat(order.currentTotalPriceSet?.shopMoney?.amount || order.totalPriceSet?.shopMoney?.amount || '0');
-    const receivedAmount = parseFloat(order.totalReceivedSet?.shopMoney?.amount || '0');
-
-    // Calculate remaining amount for COD
-    const codAmount = Math.max(0, totalAmount - receivedAmount);
-    
-    return codAmount.toFixed(2).toString();
-  };
   return (
     <AdminAction
       primaryAction={
