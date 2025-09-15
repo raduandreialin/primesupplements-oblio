@@ -51,8 +51,8 @@ class CargusAdapter extends BaseAdapter {
             throw new Error('No shipping address found');
         }
 
-        // Use custom package weight from payload
-        const totalWeight = packageInfo?.weight || 1.0; // Default to 1kg if not provided
+        // Use custom package weight from payload, ensure it's a proper number and minimum 1kg
+        const totalWeight = Math.max(Math.ceil(parseFloat(packageInfo?.weight) || 1.0), 1); // Convert to integer, minimum 1kg
 
         // Map service type to Cargus service ID
         const serviceId = this.mapServiceToCargusId(service, totalWeight);
@@ -79,13 +79,13 @@ class CargusAdapter extends BaseAdapter {
                 LocalityName: await this.validateAndMapLocality(address.city, mappedCounty),
                 AddressText: `${address.address1} ${address.address2 || ''}`.trim(),
                 ContactPerson: `${address.firstName || address.first_name} ${address.lastName || address.last_name}`,
-                PhoneNumber: address.phone || order.phone || "0700000000",
+                PhoneNumber: address.phone || order.phone || "0747866049",
                 CodPostal: address.zip,
                 Email: address.email || order.email
             },
             parcels: 1, // Always use 1 parcel for this service
             envelopes: 0, // Set to 0 since service doesn't allow multiple parts
-            totalWeight: Math.max(totalWeight, 0.1), // Minimum 0.1kg
+            totalWeight: totalWeight, // Already converted to integer above
             serviceId: serviceId,
             declaredValue: insuranceValue ? parseFloat(insuranceValue) : parseFloat(order.total_price),
             cashRepayment: codAmount ? parseFloat(codAmount) : 0,
@@ -98,7 +98,7 @@ class CargusAdapter extends BaseAdapter {
             parcelCodes: [{
                 Code: "0",
                 Type: 1,
-                Weight: Math.max(totalWeight, 0.1),
+                Weight: totalWeight,
                 Length: packageInfo?.length || 20,
                 Width: packageInfo?.width || 15,
                 Height: packageInfo?.height || 10,
