@@ -88,7 +88,8 @@ class CargusAdapter extends BaseAdapter {
             totalWeight: totalWeight, // Already converted to integer above
             serviceId: serviceId,
             declaredValue: insuranceValue ? parseFloat(insuranceValue) : parseFloat(order.total_price),
-            cashRepayment: codAmount ? parseFloat(codAmount) : 0,
+            cashRepayment: 0, // Disable cash repayment
+            bankRepayment: codAmount ? parseFloat(codAmount) : 0, // Use bank repayment for COD
             openPackage: openPackage || false,
             saturdayDelivery: saturdayDelivery || false,
             morningDelivery: morningDelivery || false,
@@ -116,6 +117,14 @@ class CargusAdapter extends BaseAdapter {
         logger.info({ awbDataForCargus: awbData }, 'Creating AWB with Cargus - Request Data');
         
         try {
+            // Log the payment method being used
+            const hasCOD = awbData.bankRepayment > 0;
+            logger.info({ 
+                hasCOD, 
+                codAmount: awbData.bankRepayment, 
+                paymentMethod: 'bankRepayment' 
+            }, 'Creating AWB with bank repayment COD');
+            
             // Use createAwb for pickup point AWBs (not createAwbWithPickup)
             const awb = await this.cargusService.createAwb(awbData);
 
@@ -224,10 +233,9 @@ class CargusAdapter extends BaseAdapter {
                 return 3; // 2-day service if available
             case 'ground':
             default:
-                // Force Service ID 35 (Standard Plus) for better COD support
-                // instead of 34 (Economic Standard) which might not support COD
-                if (weight <= 50) return 35; // Standard Plus - better COD support
-                return 50; // Heavy package service
+                // Use original weight-based service mapping
+                // Service ID 34 (Economic Standard) for ≤31kg with COD support
+                return CargusService.getServiceIdByWeight(weight);
         }
     }
 
