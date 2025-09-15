@@ -10,7 +10,8 @@
     "test": "node _tests/cargus-test.js",
     "test:shipping": "node _tests/shipping-test.js",
     "test:address": "node _tests/address-validation-test.js",
-    "test:backend": "node _tests/backend-connectivity-test.js"
+    "test:backend": "node _tests/backend-connectivity-test.js",
+    "test:pickup-points": "node _tests/pickup-points-test.js"
   },
   "keywords": [
     "oblio",

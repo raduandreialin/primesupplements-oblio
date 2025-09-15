@@ -15,6 +15,9 @@ class CargusAdapter extends BaseAdapter {
             config.cargus.username,
             config.cargus.password
         );
+        
+        // Default pickup point configuration from config
+        this.defaultPickupPoint = config.cargus.pickupPoint;
     }
 
     /**
@@ -61,14 +64,14 @@ class CargusAdapter extends BaseAdapter {
             pickupStartDate: this.getDefaultPickupStart(),
             pickupEndDate: this.getDefaultPickupEnd(),
             sender: {
-                Name: config.cargus.sender.name,
-                CountyName: config.cargus.sender.countyName,
-                LocalityName: config.cargus.sender.localityName,
-                AddressText: config.cargus.sender.addressText,
-                ContactPerson: config.cargus.sender.contactPerson,
-                PhoneNumber: config.cargus.sender.phoneNumber,
-                CodPostal: config.cargus.sender.postalCode,
-                Email: config.cargus.sender.email
+                LocationId: this.defaultPickupPoint.LocationId,
+                Name: this.defaultPickupPoint.Name,
+                CountyName: this.defaultPickupPoint.CountyName,
+                LocalityName: this.defaultPickupPoint.LocalityName,
+                AddressText: this.defaultPickupPoint.AddressText,
+                ContactPerson: this.defaultPickupPoint.ContactPerson,
+                PhoneNumber: this.defaultPickupPoint.PhoneNumber,
+                Email: this.defaultPickupPoint.Email
             },
             recipient: {
                 Name: `${address.firstName || address.first_name} ${address.lastName || address.last_name}`,
@@ -113,13 +116,14 @@ class CargusAdapter extends BaseAdapter {
         logger.info({ awbDataForCargus: awbData }, 'Creating AWB with Cargus - Request Data');
         
         try {
-            const awb = await this.cargusService.createAwbWithPickup(awbData);
+            // Use createAwb for pickup point AWBs (not createAwbWithPickup)
+            const awb = await this.cargusService.createAwb(awbData);
 
             // Detailed response analysis
             logger.info({
                 awbResponse: awb,
                 responseType: typeof awb
-            }, 'AWB Creation - Standard AwbPickup endpoint response');
+            }, 'AWB Creation - Using Pickup Point (Awbs endpoint)');
 
             // Handle AWB response - standard endpoint returns AWB ID as number/string
             let processedAwb;
@@ -179,7 +183,7 @@ class CargusAdapter extends BaseAdapter {
                     recipientCounty: awbData.recipient?.CountyName,
                     recipientLocality: awbData.recipient?.LocalityName
                 }
-            }, 'Error creating AWB with Cargus using standard AwbPickup endpoint');
+            }, 'Error creating AWB with Cargus using pickup point (Awbs endpoint)');
             
             throw new Error(`Failed to create AWB with Cargus: ${cargusError.message}`);
         }
