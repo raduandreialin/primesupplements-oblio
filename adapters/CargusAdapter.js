@@ -76,7 +76,7 @@ class CargusAdapter extends BaseAdapter {
             recipient: {
                 Name: `${address.firstName || address.first_name} ${address.lastName || address.last_name}`,
                 CountyName: mappedCounty,
-                LocalityName: await this.validateAndMapLocality(address.city, mappedCounty),
+                LocalityName: this.normalizeLocalityName(address.city),
                 AddressText: `${address.address1} ${address.address2 || ''}`.trim(),
                 ContactPerson: `${address.firstName || address.first_name} ${address.lastName || address.last_name}`,
                 PhoneNumber: address.phone || order.phone || "0747866049",
@@ -568,26 +568,42 @@ class CargusAdapter extends BaseAdapter {
     }
 
     /**
-     * Normalize locality name for better matching
+     * Normalize locality name for Cargus AWB (no validation, just normalization)
      * @param {string} name - Locality name to normalize
-     * @returns {string} Normalized name
+     * @returns {string} Normalized name for Cargus API
      */
     normalizeLocalityName(name) {
         if (!name) return '';
         
-        return name
-            .toLowerCase()
+        let normalized = name
             .trim()
-            // Remove diacritics
+            // Remove diacritics but keep original case
             .replace(/ă/g, 'a')
             .replace(/â/g, 'a')
             .replace(/î/g, 'i')
             .replace(/ș/g, 's')
             .replace(/ț/g, 't')
+            .replace(/Ă/g, 'A')
+            .replace(/Â/g, 'A')
+            .replace(/Î/g, 'I')
+            .replace(/Ș/g, 'S')
+            .replace(/Ț/g, 'T')
             // Remove extra spaces
-            .replace(/\s+/g, ' ')
-            // Remove common prefixes that might cause mismatches
-            .replace(/^(municipiul|orasul|comuna|satul)\s+/i, '');
+            .replace(/\s+/g, ' ');
+        
+        // Handle Bucharest sectors - all sectors should map to BUCURESTI
+        if (normalized.toLowerCase().includes('sector') && 
+            (normalized.toLowerCase().includes('bucuresti') || /^sector\s*[1-6]$/i.test(normalized))) {
+            return 'BUCURESTI';
+        }
+        
+        // Handle standalone sectors (Sector 1, Sector 2, etc.)
+        if (/^sector\s*[1-6]$/i.test(normalized)) {
+            return 'BUCURESTI';
+        }
+        
+        // Capitalize first letter for consistency
+        return normalized.charAt(0).toUpperCase() + normalized.slice(1).toLowerCase();
     }
 }
 
