@@ -20,5 +20,11 @@ router.post('/fulfillment/create/cargus',
     ShippingLabelController.createFromExtension.bind(ShippingLabelController)
 );
 
+// Shopify webhook: Fulfillment cancelled -> Cancel AWB (with HMAC verification)
+router.post('/fulfillment/cancel',
+    express.raw({ type: 'application/json', verify: captureRawBody }),
+    verifyShopifyWebhook,
+    ShippingLabelController.handleFulfillmentCancellation.bind(ShippingLabelController)
+);
 
 export default router;

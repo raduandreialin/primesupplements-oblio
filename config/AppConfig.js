@@ -34,14 +34,14 @@ const config = {
         },
         // Registered pickup point for AWB creation (uses /Awbs endpoint)
         pickupPoint: {
-            LocationId: 201582141,
-            Name: "PRIME SPORT SIBIU-de154a2e366c4787b31b418a639406c5",
+            LocationId: 201623250,
+            Name: "PRIME SUPPLEMENTS",
             CountyName: "Sibiu",
             LocalityName: "SIBIU",
-            AddressText: "StrCuptorului, nr 10",
-            ContactPerson: "eMAG PRIME SPORT SUPPLEMENTS SRL",
-            PhoneNumber: "+40758949279",
-            Email: "primesportsupp57@emag.ro"
+            AddressText: "Strada Cuptorului, nr 10",
+            ContactPerson: "PRIME SUPPLEMENTS",
+            PhoneNumber: "0747866049",
+            Email: "contact@primesupplements.ro"
         }
     }
 };

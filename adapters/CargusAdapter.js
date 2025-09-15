@@ -177,6 +177,17 @@ class CargusAdapter extends BaseAdapter {
                 throw new Error(`Invalid AWB response format: expected number/string, got ${typeof awb}. Response: ${JSON.stringify(awb)}`);
             }
 
+            // After successful AWB creation, try to activate the order
+            // This makes the AWB visible in the Cargus Dashboard
+            try {
+                logger.info({ awbId: processedAwb.AwbId }, 'Attempting to activate order for dashboard visibility');
+                await this.activateOrder();
+                logger.info('Order activated successfully - AWB should now be visible in Cargus Dashboard');
+            } catch (activationError) {
+                // Don't fail the entire process if activation fails
+                logger.warn({ error: activationError.message }, 'Order activation failed, but AWB was created successfully');
+            }
+
             return processedAwb;
         } catch (cargusError) {
             logger.error({ 
@@ -195,6 +206,83 @@ class CargusAdapter extends BaseAdapter {
             }, 'Error creating AWB with Cargus using pickup point (Awbs endpoint)');
             
             throw new Error(`Failed to create AWB with Cargus: ${cargusError.message}`);
+        }
+    }
+
+    /**
+     * Activate/close order for pickup point to make AWBs visible in dashboard
+     * @param {number} locationId - Pickup point location ID (default: use configured pickup point)
+     * @returns {Promise<boolean>} Success status
+     */
+    async activateOrder(locationId = null) {
+        try {
+            const pickupLocationId = locationId || this.defaultPickupPoint.LocationId;
+            const today = new Date();
+            const pickupDate = today.toISOString().split('T')[0]; // YYYY-MM-DD format
+            
+            logger.info({ pickupLocationId, pickupDate }, 'Activating order for pickup point');
+            
+            // Use the Orders endpoint to activate (action=1) the order
+            const result = await this.cargusService.request('PUT', 
+                `/Orders?locationId=${pickupLocationId}&action=1&PickupStartDate=${pickupDate}&PickupEndDate=${pickupDate}`
+            );
+            
+            logger.info({ result, pickupLocationId }, 'Order activation result');
+            return true;
+        } catch (error) {
+            logger.error({ error: error.message, locationId }, 'Failed to activate order');
+            return false;
+        }
+    }
+
+    /**
+     * Cancel/delete individual AWB (only works if no checkpoints)
+     * @param {string} barcode - AWB barcode to cancel
+     * @returns {Promise<boolean>} Success status
+     */
+    async cancelAwb(barcode) {
+        try {
+            logger.info({ barcode }, 'Attempting to cancel AWB');
+            
+            const result = await this.cargusService.request('DELETE', `/Awbs?barCode=${barcode}`);
+            
+            logger.info({ result, barcode }, 'AWB cancellation successful');
+            return true;
+        } catch (error) {
+            logger.error({ error: error.message, barcode }, 'Failed to cancel AWB');
+            
+            // Check if it's because AWB has checkpoints
+            if (error.response?.status === 409 || error.message.includes('checkpoint')) {
+                logger.warn({ barcode }, 'AWB cannot be cancelled - already has checkpoints (courier picked up)');
+            }
+            
+            return false;
+        }
+    }
+
+    /**
+     * Cancel entire order for pickup point (all AWBs for the date)
+     * @param {number} locationId - Pickup point location ID (default: use configured pickup point)
+     * @param {string} pickupDate - Date in YYYY-MM-DD format (default: today)
+     * @returns {Promise<boolean>} Success status
+     */
+    async cancelOrder(locationId = null, pickupDate = null) {
+        try {
+            const pickupLocationId = locationId || this.defaultPickupPoint.LocationId;
+            const dateToCancel = pickupDate || new Date().toISOString().split('T')[0];
+            
+            logger.info({ pickupLocationId, dateToCancel }, 'Attempting to cancel order');
+            
+            // Use action=0 to cancel the order
+            const result = await this.cargusService.request('PUT', 
+                `/Orders?locationId=${pickupLocationId}&action=0&PickupStartDate=${dateToCancel}&PickupEndDate=${dateToCancel}`
+            );
+            
+            logger.info({ result, pickupLocationId, dateToCancel }, 'Order cancellation successful');
+            return true;
+        } catch (error) {
+            logger.error({ error: error.message, locationId, pickupDate }, 'Failed to cancel order');
+            return false;
         }
     }
 

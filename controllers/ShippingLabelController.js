@@ -247,6 +247,80 @@ class ShippingLabelController {
     }
 
     /**
+     * Handle Shopify fulfillment cancellation webhook
+     * Cancels corresponding AWB in shipping provider
+     */
+    async handleFulfillmentCancellation(req, res) {
+        // Always acknowledge webhook receipt first
+        res.status(200).json({ received: true });
+        
+        try {
+            const fulfillment = req.body;
+            logger.info({ 
+                fulfillmentId: fulfillment.id,
+                orderId: fulfillment.order_id,
+                status: fulfillment.status,
+                trackingNumber: fulfillment.tracking_number
+            }, 'Processing Shopify fulfillment cancellation webhook');
+
+            // Check if this fulfillment has a tracking number (AWB)
+            if (!fulfillment.tracking_number) {
+                logger.warn({ fulfillmentId: fulfillment.id }, 'No tracking number found, skipping AWB cancellation');
+                return;
+            }
+
+            // Extract AWB barcode from tracking number
+            const awbBarcode = fulfillment.tracking_number;
+            
+            logger.info({ awbBarcode, fulfillmentId: fulfillment.id }, 'Attempting to cancel AWB');
+
+            // Cancel the AWB using the shipping adapter
+            const cancellationResult = await this.shippingAdapter.cancelAwb(awbBarcode);
+            
+            if (cancellationResult) {
+                logger.info({ 
+                    awbBarcode, 
+                    fulfillmentId: fulfillment.id,
+                    orderId: fulfillment.order_id 
+                }, 'AWB cancelled successfully');
+
+                // Update Shopify order with cancellation info
+                try {
+                    await this.shopifyService.updateOrderMetafields(fulfillment.order_id, [{
+                        namespace: 'shipping',
+                        key: 'awb_cancelled',
+                        value: new Date().toISOString(),
+                        type: 'date_time'
+                    }]);
+                    
+                    await this.shopifyService.tagOrder(fulfillment.order_id, 'AWB_CANCELLED');
+                } catch (metafieldError) {
+                    logger.warn({ error: metafieldError.message }, 'Failed to update cancellation metafields');
+                }
+            } else {
+                logger.warn({ 
+                    awbBarcode, 
+                    fulfillmentId: fulfillment.id 
+                }, 'AWB cancellation failed - may have already been picked up by courier');
+
+                // Tag order to indicate cancellation attempt failed
+                try {
+                    await this.shopifyService.tagOrder(fulfillment.order_id, 'AWB_CANCELLATION_FAILED');
+                } catch (tagError) {
+                    logger.warn({ error: tagError.message }, 'Failed to add cancellation failed tag');
+                }
+            }
+
+        } catch (error) {
+            logger.error({ 
+                error: error.message, 
+                stack: error.stack,
+                fulfillmentData: req.body 
+            }, 'Error processing fulfillment cancellation webhook');
+        }
+    }
+
+    /**
      * Update Shopify order with shipping information
      * @param {string} orderId - Shopify order ID
      * @param {Object} awb - Cargus AWB response
