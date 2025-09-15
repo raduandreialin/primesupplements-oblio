@@ -408,8 +408,8 @@ function App() {
         {labelResult && (
           <Banner tone="success">
             <BlockStack gap="small">
-              <Text fontWeight="bold">✅ Order fulfilled successfully!</Text>
-              <Text>AWB: <Text fontWeight="bold">{labelResult.data?.awbBarcode || 'N/A'}</Text></Text>
+              <Text fontWeight="bold">Order fulfilled successfully!</Text>
+                <Text>AWB: <Text fontWeight="bold">{labelResult.trackingNumber || 'N/A'}</Text></Text>
             </BlockStack>
           </Banner>
         )}
