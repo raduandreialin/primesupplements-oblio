@@ -404,40 +404,16 @@ function App() {
           </Banner>
         )}
 
-        {/* Success State */}
+        {/* Success State - Toast-like Banner */}
         {labelResult && (
           <Banner tone="success">
             <BlockStack gap="small">
-              <Text fontWeight="bold">Order fulfilled with Cargus successfully!</Text>
-              <InlineStack gap="base">
-                <Text>AWB: <Text fontWeight="bold">{labelResult.data?.awbBarcode || 'N/A'}</Text></Text>
-                <Text>Status: <Text fontWeight="bold">{labelResult.data?.status || 'N/A'}</Text></Text>
-              </InlineStack>
-              {labelResult.data?.trackingUrl && (
-                <Text>
-                  Tracking URL: <Text fontWeight="bold">{labelResult.data.trackingUrl}</Text>
-                </Text>
-              )}
+              <Text fontWeight="bold">✅ Order fulfilled successfully!</Text>
+              <Text>AWB: <Text fontWeight="bold">{labelResult.data?.awbBarcode || 'N/A'}</Text></Text>
             </BlockStack>
           </Banner>
         )}
 
-        {/* Legacy Success State - keeping for backwards compatibility */}
-        {labelResult && labelResult.trackingNumber && (
-          <Banner tone="success">
-            <BlockStack gap="small">
-              <Text fontWeight="bold">Label created successfully</Text>
-              <InlineStack gap="base">
-                <Text>Tracking: <Text fontWeight="bold">{labelResult.trackingNumber || 'N/A'}</Text></Text>
-                <Text>Cost: <Text fontWeight="bold">{
-                  labelResult.cost && labelResult.cost !== 'N/A' && labelResult.cost !== 'Contact courier for pricing'
-                    ? `${labelResult.cost} RON`
-                    : labelResult.cost || 'Contact courier'
-                }</Text></Text>
-              </InlineStack>
-            </BlockStack>
-          </Banner>
-        )}
 
          {!labelResult && (
            <BlockStack gap="large">
