@@ -333,8 +333,11 @@ export default class CargusService {
             ParcelCodes: awbData.parcelCodes || []
         };
         
-        // Use WithGetAwb endpoint to get full AWB data instead of just ID
-        return this.request('POST', '/AwbPickup/WithGetAwb', data);
+        // Use standard AwbPickup endpoint that returns AWB ID
+        logger.info('Creating AWB with standard AwbPickup endpoint');
+        const result = await this.request('POST', '/AwbPickup', data);
+        logger.info({ result, resultType: typeof result }, 'AwbPickup endpoint response');
+        return result;
     }
 
     /**

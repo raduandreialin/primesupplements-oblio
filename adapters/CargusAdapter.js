@@ -118,30 +118,54 @@ class CargusAdapter extends BaseAdapter {
             // Detailed response analysis
             logger.info({
                 awbResponse: awb,
-                responseType: typeof awb,
-                hasBarCode: awb && typeof awb === 'object' && 'BarCode' in awb,
-                barCodeValue: awb?.BarCode,
-                awbId: awb?.AwbId || awb?.Id,
-                allFields: awb && typeof awb === 'object' ? Object.keys(awb) : []
-            }, 'AWB Creation - Using WithGetAwb endpoint');
+                responseType: typeof awb
+            }, 'AWB Creation - Standard AwbPickup endpoint response');
 
-            // Validate that we received a proper AWB object
-            if (!awb || typeof awb !== 'object') {
-                throw new Error(`Invalid AWB response format: expected object, got ${typeof awb}`);
-            }
-
-            if (!awb.BarCode) {
-                logger.warn({ awb }, 'AWB response missing BarCode field');
-                // If BarCode is missing but we have an ID, use it as BarCode
-                if (awb.AwbId || awb.Id) {
-                    awb.BarCode = (awb.AwbId || awb.Id).toString();
-                    logger.info({ generatedBarCode: awb.BarCode }, 'Generated BarCode from AWB ID');
+            // Handle AWB response - standard endpoint returns AWB ID as number/string
+            let processedAwb;
+            
+            if (typeof awb === 'number' || typeof awb === 'string') {
+                // Standard response from AwbPickup - create full AWB object
+                const awbId = typeof awb === 'string' ? parseInt(awb) : awb;
+                logger.info({ awbId }, 'Creating AWB object from numeric/string response');
+                
+                processedAwb = {
+                    AwbId: awbId,
+                    Id: awbId,
+                    BarCode: awb.toString(),
+                    Status: 'Created',
+                    // Add placeholder fields that might be useful
+                    Cost: null,
+                    TotalCost: null,
+                    CreationDate: new Date().toISOString()
+                };
+                
+                logger.info({ 
+                    processedAwb,
+                    barCode: processedAwb.BarCode,
+                    awbId: processedAwb.AwbId
+                }, 'Successfully created AWB object from Cargus response');
+                
+            } else if (typeof awb === 'object' && awb !== null) {
+                // Unexpected object response - log it for debugging
+                logger.warn({ awb, awbKeys: Object.keys(awb) }, 'Received unexpected object response from AwbPickup endpoint');
+                
+                // Try to extract AWB info from object if possible
+                if (awb.BarCode || awb.AwbId || awb.Id) {
+                    processedAwb = awb;
+                    if (!processedAwb.BarCode && (processedAwb.AwbId || processedAwb.Id)) {
+                        processedAwb.BarCode = (processedAwb.AwbId || processedAwb.Id).toString();
+                    }
                 } else {
-                    throw new Error('AWB response missing both BarCode and ID fields');
+                    throw new Error(`Unexpected object response from AwbPickup: ${JSON.stringify(awb)}`);
                 }
+                
+            } else {
+                // Completely unexpected response format
+                throw new Error(`Invalid AWB response format: expected number/string, got ${typeof awb}. Response: ${JSON.stringify(awb)}`);
             }
 
-            return awb;
+            return processedAwb;
         } catch (cargusError) {
             logger.error({ 
                 error: cargusError.message, 
@@ -156,7 +180,7 @@ class CargusAdapter extends BaseAdapter {
                     recipientCounty: awbData.recipient?.CountyName,
                     recipientLocality: awbData.recipient?.LocalityName
                 }
-            }, 'Error creating AWB with Cargus using WithGetAwb endpoint');
+            }, 'Error creating AWB with Cargus using standard AwbPickup endpoint');
             
             throw new Error(`Failed to create AWB with Cargus: ${cargusError.message}`);
         }
