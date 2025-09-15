@@ -224,7 +224,10 @@ class CargusAdapter extends BaseAdapter {
                 return 3; // 2-day service if available
             case 'ground':
             default:
-                return CargusService.getServiceIdByWeight(weight);
+                // Force Service ID 35 (Standard Plus) for better COD support
+                // instead of 34 (Economic Standard) which might not support COD
+                if (weight <= 50) return 35; // Standard Plus - better COD support
+                return 50; // Heavy package service
         }
     }
 
