@@ -90,7 +90,7 @@ class CargusAdapter extends BaseAdapter {
             saturdayDelivery: saturdayDelivery || false,
             morningDelivery: morningDelivery || false,
             shipmentPayer: parseInt(shipmentPayer) || 1,
-            observations: observations || `Shopify Order #${order.order_number} - Created via Extension`,
+            observations: observations || `Primesupplements order ${order.order_number}`,
             packageContent: `Order #${order.order_number} - Package`,
             parcelCodes: [{
                 Code: "0",
