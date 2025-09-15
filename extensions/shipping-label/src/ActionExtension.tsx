@@ -305,6 +305,8 @@ function App() {
       // Backend URL
       const backendUrl = 'https://primesupplements-oblio-production.up.railway.app';
         
+      console.log('Sending fulfillment request:', fulfillmentData);
+
       const response = await fetch(`${backendUrl}/shipping/fulfillment/create/cargus`, {
         method: 'POST',
         headers: {
@@ -315,17 +317,59 @@ function App() {
         body: JSON.stringify(fulfillmentData)
       });
 
+      console.log('Response status:', response.status, response.statusText);
+
       if (!response.ok) {
-        throw new Error(`Failed to fulfill order: ${response.statusText}`);
+        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+        
+        try {
+          const errorData = await response.json();
+          console.log('Error response data:', errorData);
+          
+          if (errorData.error) {
+            errorMessage = errorData.error;
+          } else if (errorData.details) {
+            errorMessage = errorData.details;
+          } else if (errorData.message) {
+            errorMessage = errorData.message;
+          }
+        } catch (jsonError) {
+          console.log('Could not parse error response as JSON');
+          // Use the original statusText if JSON parsing fails
+        }
+        
+        throw new Error(errorMessage);
       }
 
       const result = await response.json();
+      console.log('Success response:', result);
 
       setLabelResult(result);
       setShowForm(false);
       
     } catch (error) {
-      setError(`Failed to fulfill order with Cargus: ${error.message}`);
+      console.error('Fulfillment error:', error);
+      
+      let userFriendlyMessage = error.message;
+      
+      // Handle common network errors
+      if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+        userFriendlyMessage = 'Network error: Cannot reach the server. Please check your internet connection.';
+      } else if (error.message.includes('timeout')) {
+        userFriendlyMessage = 'Request timeout: The server is taking too long to respond.';
+      } else if (error.message.includes('CORS')) {
+        userFriendlyMessage = 'CORS error: Cross-origin request blocked.';
+      } else if (error.message.includes('HTTP 401')) {
+        userFriendlyMessage = 'Authentication error: Invalid credentials.';
+      } else if (error.message.includes('HTTP 403')) {
+        userFriendlyMessage = 'Permission error: Access denied.';
+      } else if (error.message.includes('HTTP 404')) {
+        userFriendlyMessage = 'Endpoint not found: The fulfillment service is not available.';
+      } else if (error.message.includes('HTTP 500')) {
+        userFriendlyMessage = 'Server error: Internal server error occurred.';
+      }
+      
+      setError(`Failed to fulfill order with Cargus: ${userFriendlyMessage}`);
     } finally {
       setIsFulfillingOrder(false);
     }

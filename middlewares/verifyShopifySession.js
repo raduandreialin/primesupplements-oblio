@@ -26,6 +26,8 @@ export const verifyShopifySession = (req, res, next) => {
         
         const isFromShopifyAdmin = 
             userAgent.includes('Shopify') ||
+            userAgent.includes('Shopify-Admin-Extension') ||
+            req.get('X-Shopify-Extension') ||
             allowedDomains.some(domain => 
                 origin.includes(domain) || referer.includes(domain)
             );
@@ -35,7 +37,9 @@ export const verifyShopifySession = (req, res, next) => {
                 userAgent,
                 origin,
                 referer,
-                ip: req.ip
+                shopifyExtension: req.get('X-Shopify-Extension'),
+                ip: req.ip,
+                allHeaders: Object.keys(req.headers)
             });
             
             return res.status(401).json({

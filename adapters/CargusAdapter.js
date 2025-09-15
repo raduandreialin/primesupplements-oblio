@@ -277,17 +277,21 @@ class CargusAdapter extends BaseAdapter {
             throw new Error('City name is required');
         }
 
+        logger.info({ cityName, countyName }, 'Starting locality validation');
+
         try {
             // First, try to get the county ID for the county name
             const countries = await this.cargusService.getCountries();
             const romania = countries.find(c => c.Abbreviation === 'RO' || c.CountryName === 'Romania');
 
             if (!romania) {
-                logger.warn('Romania not found in countries list, using default locality');
-                return cityName; // Fallback to original city name
+                logger.error('Romania not found in countries list');
+                throw new Error(`Romania not found in Cargus countries database`);
             }
 
             const counties = await this.cargusService.getCounties(romania.CountryId);
+            logger.info({ countyName, availableCounties: counties.slice(0, 5).map(c => c.Name) }, 'Searching for county');
+            
             const county = counties.find(c =>
                 c.Name === countyName ||
                 c.Abbreviation === countyName ||
@@ -295,36 +299,107 @@ class CargusAdapter extends BaseAdapter {
             );
 
             if (!county) {
-                logger.warn({ cityName, countyName }, 'County not found, using original city name');
-                return cityName;
+                logger.error({ 
+                    cityName, 
+                    countyName, 
+                    availableCounties: counties.map(c => c.Name) 
+                }, 'County not found in Cargus database');
+                throw new Error(`County '${countyName}' not found in Cargus database. Available counties: ${counties.map(c => c.Name).join(', ')}`);
             }
+
+            logger.info({ countyName, foundCounty: county.Name, countyId: county.CountyId }, 'County found, getting localities');
 
             // Get localities for this county
             const localities = await this.cargusService.getLocalities(romania.CountryId, county.CountyId);
+            logger.info({ 
+                cityName, 
+                countyName, 
+                localitiesCount: localities.length,
+                sampleLocalities: localities.slice(0, 10).map(l => l.Name)
+            }, 'Retrieved localities for county');
 
+            // Normalize city name for better matching
+            const normalizedCityName = this.normalizeLocalityName(cityName);
+            
             // Try exact match first
-            let locality = localities.find(l => l.Name.toLowerCase() === cityName.toLowerCase());
+            let locality = localities.find(l => 
+                this.normalizeLocalityName(l.Name) === normalizedCityName
+            );
 
             // If no exact match, try partial match
             if (!locality) {
-                locality = localities.find(l =>
-                    l.Name.toLowerCase().includes(cityName.toLowerCase()) ||
-                    cityName.toLowerCase().includes(l.Name.toLowerCase())
-                );
+                locality = localities.find(l => {
+                    const normalizedLocality = this.normalizeLocalityName(l.Name);
+                    return normalizedLocality.includes(normalizedCityName) ||
+                           normalizedCityName.includes(normalizedLocality);
+                });
+            }
+
+            // If still no match, try more fuzzy matching
+            if (!locality) {
+                locality = localities.find(l => {
+                    const normalizedLocality = this.normalizeLocalityName(l.Name);
+                    // Remove common prefixes/suffixes
+                    const cleanCity = normalizedCityName.replace(/^(municipiul|orasul|comuna)\s+/i, '');
+                    const cleanLocality = normalizedLocality.replace(/^(municipiul|orasul|comuna)\s+/i, '');
+                    
+                    return cleanLocality === cleanCity ||
+                           cleanLocality.includes(cleanCity) ||
+                           cleanCity.includes(cleanLocality);
+                });
             }
 
             if (locality) {
-                logger.info({ originalCity: cityName, mappedCity: locality.Name }, 'Successfully mapped locality');
+                logger.info({ 
+                    originalCity: cityName, 
+                    mappedCity: locality.Name,
+                    localityId: locality.LocalityId 
+                }, 'Successfully mapped locality');
                 return locality.Name;
             } else {
-                logger.warn({ cityName, countyName, availableLocalities: localities.slice(0, 5).map(l => l.Name) }, 'Locality not found in Cargus database, using original name');
-                return cityName;
+                logger.error({ 
+                    cityName, 
+                    countyName, 
+                    normalizedCityName,
+                    availableLocalities: localities.slice(0, 20).map(l => l.Name),
+                    totalLocalities: localities.length
+                }, 'Locality not found in Cargus database');
+                
+                throw new Error(`Locality '${cityName}' not found in county '${countyName}'. Available localities: ${localities.slice(0, 10).map(l => l.Name).join(', ')}${localities.length > 10 ? ` (and ${localities.length - 10} more)` : ''}`);
             }
 
         } catch (error) {
-            logger.error({ error: error.message, cityName, countyName }, 'Failed to validate locality, using original name');
-            return cityName; // Fallback to original city name
+            logger.error({ 
+                error: error.message, 
+                cityName, 
+                countyName,
+                stack: error.stack 
+            }, 'Failed to validate locality');
+            throw new Error(`Address validation failed: ${error.message}`);
         }
+    }
+
+    /**
+     * Normalize locality name for better matching
+     * @param {string} name - Locality name to normalize
+     * @returns {string} Normalized name
+     */
+    normalizeLocalityName(name) {
+        if (!name) return '';
+        
+        return name
+            .toLowerCase()
+            .trim()
+            // Remove diacritics
+            .replace(/ă/g, 'a')
+            .replace(/â/g, 'a')
+            .replace(/î/g, 'i')
+            .replace(/ș/g, 's')
+            .replace(/ț/g, 't')
+            // Remove extra spaces
+            .replace(/\s+/g, ' ')
+            // Remove common prefixes that might cause mismatches
+            .replace(/^(municipiul|orasul|comuna|satul)\s+/i, '');
     }
 }
 
