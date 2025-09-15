@@ -393,6 +393,10 @@ $result = $urgent->CallMethod('TokenVerification', "", 'GET', $token);
 **Type:** POST  
 **Description:** Generate a new AWB and send a pickup order to courier.
 
+**Alternative Method:** `AwbPickup/WithGetAwb`  
+**Type:** POST  
+**Description:** Generate a new AWB with pickup order and return full AWB data (recommended for integrations).
+
 **Request Structure:**
 ```json
 {

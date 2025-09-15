@@ -117,18 +117,29 @@ class CargusAdapter extends BaseAdapter {
 
             // Detailed response analysis
             logger.info({
-                rawResponse: awb,
-                isNull: awb === null,
-                isUndefined: awb === undefined,
-                isEmpty: Object.keys(awb || {}).length === 0,
+                awbResponse: awb,
                 responseType: typeof awb,
-                responseKeys: Object.keys(awb || {}),
-                responseJSON: JSON.stringify(awb),
+                hasBarCode: awb && typeof awb === 'object' && 'BarCode' in awb,
                 barCodeValue: awb?.BarCode,
-                barCodeType: typeof awb?.BarCode,
-                hasBarCode: 'BarCode' in (awb || {}),
-                allFields: awb ? Object.entries(awb).map(([key, value]) => `${key}: ${value} (${typeof value})`) : []
-            }, 'AWB Creation - Complete Response Analysis');
+                awbId: awb?.AwbId || awb?.Id,
+                allFields: awb && typeof awb === 'object' ? Object.keys(awb) : []
+            }, 'AWB Creation - Using WithGetAwb endpoint');
+
+            // Validate that we received a proper AWB object
+            if (!awb || typeof awb !== 'object') {
+                throw new Error(`Invalid AWB response format: expected object, got ${typeof awb}`);
+            }
+
+            if (!awb.BarCode) {
+                logger.warn({ awb }, 'AWB response missing BarCode field');
+                // If BarCode is missing but we have an ID, use it as BarCode
+                if (awb.AwbId || awb.Id) {
+                    awb.BarCode = (awb.AwbId || awb.Id).toString();
+                    logger.info({ generatedBarCode: awb.BarCode }, 'Generated BarCode from AWB ID');
+                } else {
+                    throw new Error('AWB response missing both BarCode and ID fields');
+                }
+            }
 
             return awb;
         } catch (cargusError) {
@@ -141,16 +152,13 @@ class CargusAdapter extends BaseAdapter {
                     parcels: awbData.parcels,
                     envelopes: awbData.envelopes,
                     totalWeight: awbData.totalWeight,
-                    parcelCodesCount: awbData.parcelCodes?.length,
                     serviceId: awbData.serviceId,
-                    recipient: {
-                        name: awbData.recipient?.Name,
-                        county: awbData.recipient?.CountyName,
-                        city: awbData.recipient?.LocalityName
-                    }
+                    recipientCounty: awbData.recipient?.CountyName,
+                    recipientLocality: awbData.recipient?.LocalityName
                 }
-            }, 'Failed to create AWB with Cargus - detailed error info');
-            throw cargusError;
+            }, 'Error creating AWB with Cargus using WithGetAwb endpoint');
+            
+            throw new Error(`Failed to create AWB with Cargus: ${cargusError.message}`);
         }
     }
 
