@@ -275,10 +275,32 @@ function App() {
       setIsFulfillingOrder(true);
       setError('');
 
-       const fulfillmentData = {
-         orderId: orderInfo.id,
-         notifyCustomer: true // Always notify customer about fulfillment
-       };
+      const fulfillmentData = {
+        orderId: orderInfo.id,
+        orderNumber: orderInfo.orderNumber,
+        carrier: shippingForm.carrier,
+        service: shippingForm.service,
+        package: {
+          weight: parseFloat(shippingForm.weight) || 1.0,
+          length: parseFloat(shippingForm.length) || 20,
+          width: parseFloat(shippingForm.width) || 15,
+          height: parseFloat(shippingForm.height) || 10
+        },
+        insurance: shippingForm.insurance,
+        insuranceValue: shippingForm.insuranceValue,
+        customShippingAddress: shippingAddress,
+        codAmount: shippingForm.codAmount,
+        openPackage: shippingForm.openPackage,
+        saturdayDelivery: shippingForm.saturdayDelivery,
+        morningDelivery: shippingForm.morningDelivery,
+        shipmentPayer: shippingForm.shipmentPayer,
+        observations: shippingForm.observations,
+        envelopes: parseInt(shippingForm.envelopes) || 0,
+        orderTotal: shippingForm.insuranceValue, // Use insurance value as order total
+        orderEmail: shippingAddress.email,
+        orderPhone: shippingAddress.phone,
+        notifyCustomer: true
+      };
 
       // Backend URL
       const backendUrl = 'https://primesupplements-oblio-production.up.railway.app';
