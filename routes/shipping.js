@@ -12,11 +12,11 @@ router.post('/create',
     ShippingLabelController.createFromShopifyOrder.bind(ShippingLabelController)
 );
 
-// Route for extension (with session verification and JSON parsing)
-router.post('/create-label',
+// Main Cargus fulfillment endpoint for extensions (with session verification and JSON parsing)
+router.post('/fulfillment/create/cargus',
     express.json(),
     verifyShopifySession,
-    ShippingLabelController.createFromExtension.bind(ShippingLabelController)
+    ShippingLabelController.fulfillOrder.bind(ShippingLabelController)
 );
 
 

@@ -31,7 +31,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   
-   // Shipping label form state
+   // Fulfillment form state (legacy shipping form - now simplified)
    const [shippingForm, setShippingForm] = useState({
      carrier: 'cargus',
      service: 'ground',
@@ -65,7 +65,7 @@ function App() {
     email: ''
   });
   
-  const [isCreatingLabel, setIsCreatingLabel] = useState(false);
+  const [isFulfillingOrder, setIsFulfillingOrder] = useState(false);
   const [labelResult, setLabelResult] = useState(null);
   const [showForm, setShowForm] = useState(true); // Show form by default
   
@@ -269,55 +269,32 @@ function App() {
     }
   };
 
-  // Function to create shipping label
-  const createShippingLabel = async () => {
+  // Function to fulfill order with Cargus
+  const fulfillOrderWithCargus = async () => {
     try {
-      setIsCreatingLabel(true);
+      setIsFulfillingOrder(true);
       setError('');
 
-       const labelData = {
+       const fulfillmentData = {
          orderId: orderInfo.id,
-         orderNumber: orderInfo.orderNumber,
-         carrier: shippingForm.carrier,
-         service: shippingForm.service,
-         package: {
-           weight: parseFloat(shippingForm.weight),
-           length: parseFloat(shippingForm.length),
-           width: parseFloat(shippingForm.width),
-           height: parseFloat(shippingForm.height)
-         },
-         insurance: shippingForm.insurance,
-         insuranceValue: shippingForm.insuranceValue,
-         customShippingAddress: shippingAddress,
-         codAmount: shippingForm.codAmount,
-         openPackage: shippingForm.openPackage,
-         saturdayDelivery: shippingForm.saturdayDelivery,
-         morningDelivery: shippingForm.morningDelivery,
-         shipmentPayer: shippingForm.shipmentPayer,
-         observations: shippingForm.observations,
-         envelopes: parseInt(shippingForm.envelopes) || 0,
-         // Additional order data to avoid backend Shopify API calls
-         orderTotal: shippingForm.insuranceValue, // Use insurance value as order total
-         orderEmail: shippingAddress.email || '',
-         orderPhone: shippingAddress.phone || ''
+         notifyCustomer: true // Always notify customer about fulfillment
        };
-
 
       // Backend URL
       const backendUrl = 'https://primesupplements-oblio-production.up.railway.app';
         
-      const response = await fetch(`${backendUrl}/shipping/create-label`, {
+      const response = await fetch(`${backendUrl}/shipping/fulfillment/create/cargus`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'User-Agent': 'Shopify-Admin-Extension',
           'X-Shopify-Extension': 'shipping-label'
         },
-        body: JSON.stringify(labelData)
+        body: JSON.stringify(fulfillmentData)
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to create label: ${response.statusText}`);
+        throw new Error(`Failed to fulfill order: ${response.statusText}`);
       }
 
       const result = await response.json();
@@ -326,9 +303,9 @@ function App() {
       setShowForm(false);
       
     } catch (error) {
-      setError(`Failed to create shipping label: ${error.message}`);
+      setError(`Failed to fulfill order with Cargus: ${error.message}`);
     } finally {
-      setIsCreatingLabel(false);
+      setIsFulfillingOrder(false);
     }
   };
 
@@ -481,13 +458,13 @@ function App() {
             if (labelResult) {
               close();
             } else {
-              createShippingLabel();
+              fulfillOrderWithCargus();
             }
           }}
-          disabled={isCreatingLabel || !validateShippingAddress(shippingAddress).isValid}
+          disabled={isFulfillingOrder || !validateShippingAddress(shippingAddress).isValid}
           variant={labelResult ? 'secondary' : 'primary'}
         >
-          {labelResult ? 'Done' : 'Create Label'}
+          {labelResult ? 'Done' : 'Fulfill with Cargus'}
         </Button>
       }
       secondaryAction={
@@ -510,14 +487,32 @@ function App() {
           </Banner>
         )}
 
-        {isCreatingLabel && (
+        {isFulfillingOrder && (
           <Banner>
-            <Text fontWeight="bold">Creating shipping label...</Text>
+            <Text fontWeight="bold">Fulfilling order with Cargus...</Text>
           </Banner>
         )}
 
         {/* Success State */}
         {labelResult && (
+          <Banner tone="success">
+            <BlockStack gap="small">
+              <Text fontWeight="bold">Order fulfilled with Cargus successfully!</Text>
+              <InlineStack gap="base">
+                <Text>AWB: <Text fontWeight="bold">{labelResult.data?.awbBarcode || 'N/A'}</Text></Text>
+                <Text>Status: <Text fontWeight="bold">{labelResult.data?.status || 'N/A'}</Text></Text>
+              </InlineStack>
+              {labelResult.data?.trackingUrl && (
+                <Text>
+                  Tracking URL: <Text fontWeight="bold">{labelResult.data.trackingUrl}</Text>
+                </Text>
+              )}
+            </BlockStack>
+          </Banner>
+        )}
+
+        {/* Legacy Success State - keeping for backwards compatibility */}
+        {labelResult && labelResult.trackingNumber && (
           <Banner tone="success">
             <BlockStack gap="small">
               <Text fontWeight="bold">Label created successfully</Text>

@@ -195,19 +195,361 @@ export default class ShopifyService {
         
         return await this.updateOrderMetafields(orderId, metafields);
     }
+
+    /**
+     * Get order with fulfillment orders for fulfillment processing
+     * @param {string|number} orderId - Shopify order ID
+     * @returns {Promise<Object>} Order with fulfillment orders
+     */
+    async getOrderWithFulfillmentOrders(orderId) {
+        try {
+            const gqlOrderId = `gid://shopify/Order/${orderId}`;
+            
+            const query = `
+                query GetOrderWithFulfillmentOrders($id: ID!) {
+                    order(id: $id) {
+                        id
+                        name
+                        email
+                        phone
+                        displayFulfillmentStatus
+                        fulfillable
+                        fulfillments(first: 10) {
+                            id
+                            status
+                            trackingInfo(first: 5) {
+                                company
+                                number
+                                url
+                            }
+                        }
+                        lineItems(first: 50) {
+                            edges {
+                                node {
+                                    id
+                                    name
+                                    quantity
+                                    unfulfilledQuantity
+                                    requiresShipping
+                                    fulfillmentStatus
+                                }
+                            }
+                        }
+                        fulfillmentOrders(first: 10) {
+                            edges {
+                                node {
+                                    id
+                                    status
+                                    requestStatus
+                                    supportedActions {
+                                        action
+                                    }
+                                    destination {
+                                        address1
+                                        address2
+                                        city
+                                        countryCode
+                                        email
+                                        firstName
+                                        lastName
+                                        phone
+                                        province
+                                        zip
+                                    }
+                                    lineItems(first: 50) {
+                                        edges {
+                                            node {
+                                                id
+                                                totalQuantity
+                                                remainingQuantity
+                                                lineItem {
+                                                    id
+                                                    name
+                                                    quantity
+                                                    sku
+                                                    variant {
+                                                        id
+                                                        title
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    assignedLocation {
+                                        name
+                                        location {
+                                            id
+                                            name
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            `;
+            
+            const variables = { id: gqlOrderId };
+            const response = await this.graphQLQuery(query, variables);
+            
+            if (!response.order) {
+                throw new Error(`Order ${orderId} not found`);
+            }
+            
+            logger.info({ orderId, fulfillmentOrdersCount: response.order.fulfillmentOrders.edges.length }, 'Retrieved order with fulfillment orders');
+            
+            return response.order;
+            
+        } catch (error) {
+            logger.error({ orderId, error: error.message }, 'Failed to get order with fulfillment orders');
+            throw error;
+        }
+    }
+
+    /**
+     * Create fulfillment for order with Cargus tracking information
+     * @param {string|number} orderId - Shopify order ID
+     * @param {Object} trackingInfo - Tracking information from Cargus
+     * @param {string} trackingInfo.barcode - AWB barcode
+     * @param {string} trackingInfo.trackingUrl - Tracking URL
+     * @param {boolean} notifyCustomer - Whether to notify customer
+     * @returns {Promise<Object>} Created fulfillment
+     */
+    async createFulfillmentWithTracking(orderId, trackingInfo, notifyCustomer = true) {
+        try {
+            logger.info({ orderId, trackingInfo, notifyCustomer }, 'Creating fulfillment with tracking using 2025-07 API');
+            
+            // Step 1: Check if order has fulfillment orders using GraphQL
+            const orderWithFulfillmentOrders = await this.getOrderWithFulfillmentOrders(orderId);
+            
+            if (orderWithFulfillmentOrders.fulfillmentOrders.edges.length === 0) {
+                logger.warn({ orderId }, 'No fulfillment orders found - this order may be from a legacy system or store configuration issue');
+                
+                // For orders without fulfillment orders, we cannot use the 2025-07 fulfillment API
+                // This requires store configuration changes or using a different approach
+                throw new Error(`Cannot fulfill order ${orderId}: No fulfillment orders found. This order may be from a legacy system. Please check your store's fulfillment configuration or contact Shopify support.`);
+            }
+            
+            // Step 2: Filter fulfillment orders that support CREATE_FULFILLMENT
+            const fulfillableFulfillmentOrders = orderWithFulfillmentOrders.fulfillmentOrders.edges.filter(edge => {
+                const actions = edge.node.supportedActions.map(action => action.action);
+                return actions.includes('CREATE_FULFILLMENT') && edge.node.status === 'OPEN';
+            });
+            
+            if (fulfillableFulfillmentOrders.length === 0) {
+                throw new Error(`No fulfillable fulfillment orders found for order ${orderId}. Order may already be fulfilled or not ready for fulfillment.`);
+            }
+            
+            // Step 3: Create fulfillment using GraphQL fulfillmentCreateV2 (2025-07 API)
+            const mutation = `
+                mutation FulfillmentCreateV2($fulfillment: FulfillmentV2Input!) {
+                    fulfillmentCreateV2(fulfillment: $fulfillment) {
+                        fulfillment {
+                            id
+                            status
+                            trackingInfo(first: 10) {
+                                company
+                                number
+                                url
+                            }
+                        }
+                        userErrors {
+                            field
+                            message
+                        }
+                    }
+                }
+            `;
+            
+            const variables = {
+                fulfillment: {
+                    notifyCustomer: notifyCustomer,
+                    trackingInfo: {
+                        company: "Cargus",
+                        number: trackingInfo.barcode,
+                        url: trackingInfo.trackingUrl
+                    },
+                    lineItemsByFulfillmentOrder: fulfillableFulfillmentOrders.map(edge => ({
+                        fulfillmentOrderId: edge.node.id
+                        // If fulfillmentOrderLineItems aren't provided, it fulfills all remaining line items
+                    }))
+                }
+            };
+            
+            logger.info({ orderId, variables }, 'Creating fulfillment with 2025-07 GraphQL API');
+            const response = await this.graphQLQuery(mutation, variables);
+            const fulfillmentCreateV2 = response.fulfillmentCreateV2 || response?.data?.fulfillmentCreateV2;
+            
+            if (!fulfillmentCreateV2) {
+                throw new Error('Unexpected GraphQL response shape: missing fulfillmentCreateV2');
+            }
+            
+            if (Array.isArray(fulfillmentCreateV2.userErrors) && fulfillmentCreateV2.userErrors.length > 0) {
+                throw new Error(`GraphQL errors: ${JSON.stringify(fulfillmentCreateV2.userErrors)}`);
+            }
+            
+            logger.info({ 
+                orderId, 
+                fulfillmentId: fulfillmentCreateV2.fulfillment.id,
+                trackingNumber: trackingInfo.barcode,
+                status: fulfillmentCreateV2.fulfillment.status
+            }, 'Fulfillment created successfully with 2025-07 API');
+            
+            return fulfillmentCreateV2.fulfillment;
+            
+        } catch (error) {
+            logger.error({ orderId, trackingInfo, error: error.message }, 'Failed to create fulfillment');
+            throw error;
+        }
+    }
+
+
+    /**
+     * Set shipping/fulfillment metafields on order
+     * @param {string|number} orderId - Shopify order ID
+     * @param {string} awbBarcode - AWB barcode
+     * @param {string} trackingUrl - Tracking URL
+     * @param {string} fulfillmentId - Shopify fulfillment ID
+     * @returns {Promise<Object>} Updated order object
+     */
+    async setShippingMetafields(orderId, awbBarcode, trackingUrl, fulfillmentId) {
+        const metafields = [
+            {
+                namespace: 'custom',
+                key: 'awb_barcode',
+                value: awbBarcode,
+                type: 'single_line_text_field'
+            },
+            {
+                namespace: 'custom',
+                key: 'tracking_url',
+                value: trackingUrl,
+                type: 'url'
+            },
+            {
+                namespace: 'custom',
+                key: 'fulfillment_id',
+                value: fulfillmentId,
+                type: 'single_line_text_field'
+            },
+            {
+                namespace: 'custom',
+                key: 'shipping_carrier',
+                value: 'Cargus',
+                type: 'single_line_text_field'
+            }
+        ];
+        
+        return await this.updateOrderMetafields(orderId, metafields);
+    }
+
+    /**
+     * Find unfulfilled orders for testing purposes
+     * @param {number} first - Number of orders to retrieve
+     * @returns {Promise<Array>} List of unfulfilled orders
+     */
+    async findUnfulfilledOrders(first = 10) {
+        try {
+            const query = `
+                query FindUnfulfilledOrders($first: Int!) {
+                    orders(first: $first, query: "fulfillment_status:unfulfilled") {
+                        edges {
+                            node {
+                                id
+                                name
+                                displayFulfillmentStatus
+                                fulfillable
+                                createdAt
+                                lineItems(first: 5) {
+                                    edges {
+                                        node {
+                                            name
+                                            quantity
+                                            unfulfilledQuantity
+                                            requiresShipping
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            `;
+            
+            const variables = { first };
+            const response = await this.graphQLQuery(query, variables);
+            
+            const orders = response.orders.edges.map(edge => ({
+                id: edge.node.id.replace('gid://shopify/Order/', ''),
+                gqlId: edge.node.id,
+                name: edge.node.name,
+                displayFulfillmentStatus: edge.node.displayFulfillmentStatus,
+                fulfillable: edge.node.fulfillable,
+                createdAt: edge.node.createdAt,
+                lineItems: edge.node.lineItems.edges.map(lineEdge => lineEdge.node)
+            }));
+            
+            logger.info({ count: orders.length }, 'Found unfulfilled orders');
+            
+            return orders;
+            
+        } catch (error) {
+            logger.error({ error: error.message }, 'Failed to find unfulfilled orders');
+            throw error;
+        }
+    }
+
+    /**
+     * Fulfill order with Cargus AWB - Complete fulfillment process
+     * @param {string|number} orderId - Shopify order ID
+     * @param {Object} awbData - AWB data from Cargus
+     * @param {boolean} notifyCustomer - Whether to notify customer
+     * @returns {Promise<Object>} Fulfillment result
+     */
+    async fulfillOrderWithCargus(orderId, awbData, notifyCustomer = true) {
+        try {
+            logger.info({ orderId, awbBarcode: awbData.BarCode }, 'Starting Shopify order fulfillment with Cargus');
+            
+            const trackingInfo = {
+                barcode: awbData.BarCode,
+                trackingUrl: `https://www.cargus.ro/personal/urmareste-coletul/?tracking_number=${awbData.BarCode}`
+            };
+            
+            // Create fulfillment with tracking
+            const fulfillment = await this.createFulfillmentWithTracking(orderId, trackingInfo, notifyCustomer);
+            
+            // Set shipping metafields
+            const fulfillmentId = fulfillment.id || `fulfillment-${fulfillment.id}`;
+            await this.setShippingMetafields(orderId, awbData.BarCode, trackingInfo.trackingUrl, fulfillmentId);
+            
+            // Tag order as fulfilled with Cargus
+            await this.tagOrder(orderId, 'Fulfilled with Cargus');
+            
+            logger.info({ 
+                orderId, 
+                fulfillmentId,
+                awbBarcode: awbData.BarCode,
+                trackingUrl: trackingInfo.trackingUrl
+            }, 'Order fulfillment with Cargus completed successfully');
+            
+            return {
+                fulfillment: fulfillment,
+                awbBarcode: awbData.BarCode,
+                trackingUrl: trackingInfo.trackingUrl,
+                awbId: awbData.AwbId || awbData.Id || awbData.awbId || awbData.OrderId
+            };
+            
+        } catch (error) {
+            logger.error({ orderId, awbData, error: error.message }, 'Failed to fulfill order with Cargus');
+            
+            // Set error metafield for debugging
+            try {
+                await this.setErrorMetafield(orderId, `Fulfillment failed: ${error.message}`);
+            } catch (metafieldError) {
+                logger.error({ orderId, error: metafieldError.message }, 'Failed to set error metafield');
+            }
+            
+            throw error;
+        }
+    }
 }
-
-// const shopName = config.shopify.B2C_SHOPIFY_SHOPNAME;
-// const accessToken = config.shopify.B2C_SHOPIFY_ACCESS_TOKEN;
-// console.log(shopName, accessToken); 
-// const shopifyService = new ShopifyService(shopName, accessToken);
-
-// shopifyService.graphQLQuery(`
-//     query {
-//         shop {
-//             name
-//         }
-//     }
-// `)
-// .then((res) => console.log(res))
-// .catch((err) => console.log(err));

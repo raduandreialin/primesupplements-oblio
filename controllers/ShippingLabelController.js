@@ -1,15 +1,12 @@
-import CargusService from '../services/CargusService.js';
+import { AdapterFactory } from '../adapters/index.js';
 import ShopifyService from '../services/ShopifyService.js';
 import config from '../config/AppConfig.js';
 import { logger } from '../utils/index.js';
 
 class ShippingLabelController {
     constructor() {
-        this.cargusService = new CargusService(
-            config.cargus.subscriptionKey,
-            config.cargus.username,
-            config.cargus.password
-        );
+        // Default to Cargus adapter, but this can be made configurable
+        this.shippingAdapter = AdapterFactory.createAdapter(AdapterFactory.ADAPTERS.CARGUS);
         this.shopifyService = new ShopifyService(
             config.shopify.B2C_SHOPIFY_SHOPNAME,
             config.shopify.B2C_SHOPIFY_ACCESS_TOKEN
@@ -17,7 +14,7 @@ class ShippingLabelController {
     }
 
     /**
-     * Create shipping label from extension with custom package details
+     * Create shipping label from extension with custom package details and fulfill the order
      * @param {Object} req - Express request object
      * @param {Object} res - Express response object
      */
@@ -43,7 +40,8 @@ class ShippingLabelController {
                 envelopes,
                 orderTotal,
                 orderEmail,
-                orderPhone
+                orderPhone,
+                notifyCustomer = true
             } = req.body;
             
             if (!orderId || !orderNumber) {
@@ -61,7 +59,6 @@ class ShippingLabelController {
             logger.info({ numericOrderId }, 'Extracted numeric order ID');
 
             // Create a minimal order object from the payload data
-            // We don't need to fetch from Shopify since we have all the data we need
             const order = {
                 id: numericOrderId,
                 order_number: orderNumber,
@@ -73,14 +70,13 @@ class ShippingLabelController {
             
             logger.info({ orderId: order.id, orderNumber: order.order_number }, 'Using order data from extension payload');
 
-            // Convert Shopify order to Cargus AWB data with custom package info and address
-            logger.info('Converting order to Cargus AWB data');
+            // Convert Shopify order to shipping provider AWB data with custom package info and address
+            logger.info('Converting order to shipping provider AWB data');
             let awbData;
             try {
-                awbData = await this.convertShopifyOrderToAwbWithCustomPackage(
+                awbData = await this.shippingAdapter.convertOrderToAwbData(
                     order, 
                     packageInfo, 
-                    carrier, 
                     service, 
                     customShippingAddress, 
                     codAmount, 
@@ -93,20 +89,20 @@ class ShippingLabelController {
                     envelopes
                 );
                 logger.info({ 
-                awbData: {
-                    parcels: awbData.parcels,
-                    envelopes: awbData.envelopes,
-                    totalWeight: awbData.totalWeight,
-                    parcelCodesCount: awbData.parcelCodes?.length,
-                    expectedParcelCodes: awbData.parcels + awbData.envelopes,
-                    parcelCodes: awbData.parcelCodes?.map(pc => ({ 
-                        Code: pc.Code, 
-                        Weight: pc.Weight, 
-                        Type: pc.Type,
-                        ParcelContent: pc.ParcelContent
-                    }))
-                }
-            }, 'Successfully converted to AWB data - parcelCodes should equal parcels + envelopes');
+                    awbData: {
+                        parcels: awbData.parcels,
+                        envelopes: awbData.envelopes,
+                        totalWeight: awbData.totalWeight,
+                        parcelCodesCount: awbData.parcelCodes?.length,
+                        expectedParcelCodes: awbData.parcels + awbData.envelopes,
+                        parcelCodes: awbData.parcelCodes?.map(pc => ({ 
+                            Code: pc.Code, 
+                            Weight: pc.Weight, 
+                            Type: pc.Type,
+                            ParcelContent: pc.ParcelContent
+                        }))
+                    }
+                }, 'Successfully converted to AWB data - parcelCodes should equal parcels + envelopes');
             } catch (conversionError) {
                 logger.error({ 
                     error: conversionError.message, 
@@ -118,26 +114,16 @@ class ShippingLabelController {
                 throw conversionError;
             }
             
-            // Create AWB with Cargus
-            logger.info('Creating AWB with Cargus');
+            // Create AWB with shipping provider
             let awb;
             try {
-                awb = await this.cargusService.createAwbWithPickup(awbData);
-                logger.info({
-                    awbResponse: awb,
-                    awbKeys: Object.keys(awb || {}),
-                    awbType: typeof awb,
-                    awbStringified: JSON.stringify(awb),
-                    barCode: awb?.BarCode,
-                    cost: awb?.Cost,
-                    totalCost: awb?.TotalCost
-                }, 'AWB Creation Response Debug');
-            } catch (cargusError) {
+                awb = await this.shippingAdapter.createAwb(awbData);
+            } catch (shippingError) {
                 logger.error({ 
-                    error: cargusError.message, 
-                    stack: cargusError.stack,
-                    statusCode: cargusError.response?.status,
-                    responseData: cargusError.response?.data,
+                    error: shippingError.message, 
+                    stack: shippingError.stack,
+                    statusCode: shippingError.response?.status,
+                    responseData: shippingError.response?.data,
                     awbDataSummary: {
                         parcels: awbData.parcels,
                         envelopes: awbData.envelopes,
@@ -150,15 +136,37 @@ class ShippingLabelController {
                             city: awbData.recipient?.LocalityName
                         }
                     }
-                }, 'Failed to create AWB with Cargus - detailed error info');
-                throw cargusError;
+                }, 'Failed to create AWB with shipping provider - detailed error info');
+                throw shippingError;
             }
             
-            // Update Shopify order with shipping info
+            // Fulfill the order in Shopify with shipping tracking
+            logger.info('Fulfilling order in Shopify with shipping tracking');
+            let fulfillmentResult;
+            try {
+                fulfillmentResult = await this.shopifyService.fulfillOrderWithCargus(numericOrderId, awb, notifyCustomer);
+                logger.info({
+                    orderId: numericOrderId,
+                    fulfillmentId: fulfillmentResult.fulfillmentId,
+                    awbBarcode: fulfillmentResult.awbBarcode,
+                    trackingUrl: fulfillmentResult.trackingUrl
+                }, 'Order fulfilled successfully with shipping provider');
+            } catch (fulfillmentError) {
+                logger.error({
+                    error: fulfillmentError.message,
+                    stack: fulfillmentError.stack,
+                    numericOrderId,
+                    awb
+                }, 'Failed to fulfill order in Shopify, but AWB was created successfully');
+                // Don't throw here - we still want to return the AWB data even if fulfillment fails
+                // The user can manually fulfill or we can retry later
+            }
+
+            // Update Shopify order with additional shipping info
             logger.info('Updating Shopify order with shipping info');
             try {
                 const additionalData = {
-                    weight: totalWeight,
+                    weight: awbData.totalWeight,
                     length: packageInfo?.length,
                     width: packageInfo?.width,
                     height: packageInfo?.height,
@@ -174,7 +182,7 @@ class ShippingLabelController {
                 };
 
                 await this.updateShopifyOrderWithShippingInfo(numericOrderId, awb, additionalData);
-                logger.info('Successfully updated Shopify order');
+                logger.info('Successfully updated Shopify order with shipping info');
             } catch (updateError) {
                 logger.error({
                     error: updateError.message,
@@ -182,22 +190,34 @@ class ShippingLabelController {
                     numericOrderId,
                     awb
                 }, 'Failed to update Shopify order with shipping info');
-                // Don't throw here - we still want to return the AWB data even if Shopify update fails
+                // Don't throw here - we still want to return the AWB data even if update fails
             }
 
+            // Prepare response data
             const responseData = {
                 success: true,
                 trackingNumber: awb.BarCode || 'N/A',
-                labelUrl: `https://urgentcargus.ro/tracking-colet/${awb.BarCode || 'N/A'}`,
+                labelUrl: this.shippingAdapter.getTrackingUrl(awb.BarCode || 'N/A'),
                 cost: awb.Cost || awb.TotalCost || awb.GrandTotal || awb.Price || awb.Total || awb.Amount || 'Contact courier for pricing',
                 awbId: awb.AwbId || awb.Id || awb.awbId || awb.OrderId || awb.TrackingId || 'Generated',
-                orderId: orderId
+                orderId: orderId,
+                carrier: this.shippingAdapter.getCarrierName()
             };
+
+            // Add fulfillment data if successful
+            if (fulfillmentResult) {
+                responseData.fulfillment = {
+                    id: fulfillmentResult.fulfillmentId,
+                    status: 'fulfilled',
+                    trackingUrl: fulfillmentResult.trackingUrl
+                };
+            }
 
             logger.info({
                 orderId,
                 awbBarcode: awb.BarCode,
                 awbId: awb.AwbId || awb.Id || awb.awbId || awb.OrderId || 'N/A',
+                fulfillmentId: fulfillmentResult?.fulfillmentId || 'N/A',
                 responseToFrontend: responseData,
                 rawAwbFields: {
                     BarCode: awb.BarCode,
@@ -207,7 +227,7 @@ class ShippingLabelController {
                     AwbId: awb.AwbId,
                     Id: awb.Id
                 }
-            }, 'Shipping label created successfully - Response Debug');
+            }, 'Shipping label created and order fulfilled successfully - Response Debug');
 
             res.json(responseData);
 
@@ -227,518 +247,45 @@ class ShippingLabelController {
     }
 
     /**
-     * Create shipping label from Shopify order
-     * @param {Object} req - Express request object
-     * @param {Object} res - Express response object
-     */
-    async createFromShopifyOrder(req, res) {
-        try {
-            const { orderId } = req.body;
-            
-            if (!orderId) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'Order ID is required'
-                });
-            }
-
-            logger.info({ orderId }, 'Creating shipping label for Shopify order');
-
-            // Get Shopify order details
-            const order = await this.shopifyService.getOrder(orderId);
-            
-            if (!order) {
-                return res.status(404).json({
-                    success: false,
-                    error: 'Order not found'
-                });
-            }
-
-            // Convert Shopify order to Cargus AWB data
-            const awbData = await this.convertShopifyOrderToAwb(order);
-            
-            // Create AWB with Cargus
-            const awb = await this.cargusService.createAwbWithPickup(awbData);
-            
-            // Update Shopify order with shipping info
-            await this.updateShopifyOrderWithShippingInfo(orderId, awb);
-
-            logger.info({
-                orderId,
-                awbBarcode: awb.BarCode,
-                awbId: awb.AwbId || awb.Id || awb.awbId || awb.OrderId || 'N/A'
-            }, 'Shipping label created successfully');
-
-            res.json({
-                success: true,
-                data: {
-                    awbBarcode: awb.BarCode,
-                    awbId: awb.AwbId,
-                    trackingUrl: `https://urgentcargus.ro/tracking-colet/${awb.BarCode}`,
-                    orderId: orderId
-                }
-            });
-
-        } catch (error) {
-            logger.error({ 
-                orderId: req.body?.orderId,
-                error: error.message,
-                stack: error.stack
-            }, 'Failed to create shipping label');
-
-            res.status(500).json({
-                success: false,
-                error: 'Failed to create shipping label',
-                details: error.message
-            });
-        }
-    }
-
-
-    // ==================== HELPER METHODS ====================
-
-    /**
-     * Convert Shopify order to Cargus AWB data
-     * @param {Object} order - Shopify order object
-     * @returns {Object} Cargus AWB data
-     */
-    async convertShopifyOrderToAwb(order) {
-        const shippingAddress = order.shipping_address;
-        const billingAddress = order.billing_address;
-        const address = shippingAddress || billingAddress;
-
-        if (!address) {
-            throw new Error('No shipping or billing address found in order');
-        }
-
-        // Calculate total weight (you might want to get this from product data)
-        const totalWeight = order.line_items.reduce((sum, item) => {
-            // Assume 0.5kg per item if no weight specified
-            const itemWeight = item.grams ? item.grams / 1000 : 0.5;
-            return sum + (itemWeight * item.quantity);
-        }, 0);
-
-        return {
-            pickupStartDate: this.getDefaultPickupStart(),
-            pickupEndDate: this.getDefaultPickupEnd(),
-            sender: {
-                Name: config.cargus.sender.name,
-                CountyName: config.cargus.sender.countyName,
-                LocalityName: config.cargus.sender.localityName,
-                AddressText: config.cargus.sender.addressText,
-                ContactPerson: config.cargus.sender.contactPerson,
-                PhoneNumber: config.cargus.sender.phoneNumber,
-                CodPostal: config.cargus.sender.postalCode,
-                Email: config.cargus.sender.email
-            },
-            recipient: {
-                Name: `${address.first_name} ${address.last_name}`,
-                CountyName: this.mapProvinceToCounty(address.province),
-                LocalityName: await this.validateAndMapLocality(address.city, this.mapProvinceToCounty(address.province)),
-                AddressText: `${address.address1} ${address.address2 || ''}`.trim(),
-                ContactPerson: `${address.first_name} ${address.last_name}`,
-                PhoneNumber: address.phone || order.phone || "0700000000",
-                CodPostal: address.zip,
-                Email: order.email
-            },
-            parcels: order.line_items.length,
-            totalWeight: Math.max(totalWeight, 0.1), // Minimum 0.1kg
-            serviceId: CargusService.getServiceIdByWeight(totalWeight),
-            declaredValue: parseFloat(order.total_price),
-            cashRepayment: order.financial_status === 'pending' ? parseFloat(order.total_price) : 0,
-            observations: `Shopify Order #${order.order_number}`,
-            packageContent: order.line_items.map(item => item.name).join(', ').substring(0, 100),
-            parcelCodes: order.line_items.map((item, index) => ({
-                Code: index.toString(),
-                Type: 1,
-                Weight: item.grams ? item.grams / 1000 : 0.5,
-                Length: 20,
-                Width: 15,
-                Height: 10,
-                ParcelContent: item.name.substring(0, 50)
-            }))
-        };
-    }
-
-    /**
-     * Convert Shopify order to Cargus AWB data with custom package information
-     * @param {Object} order - Shopify order object
-     * @param {Object} packageInfo - Custom package information from extension
-     * @param {string} carrier - Selected carrier (currently only Cargus supported)
-     * @param {string} service - Selected service type
-     * @param {Object} customShippingAddress - Custom shipping address from extension
-     * @param {string} codAmount - Cash on Delivery amount from extension
-     * @param {string} insuranceValue - Insurance value from extension
-     * @param {boolean} openPackage - Allow recipient to open package before payment
-     * @param {boolean} saturdayDelivery - Saturday delivery option
-     * @param {boolean} morningDelivery - Morning delivery option
-     * @param {string} shipmentPayer - Who pays for shipping (1: sender, 2: recipient)
-     * @param {string} observations - Custom notes/observations
-     * @param {number} envelopes - Number of envelopes
-     * @returns {Object} Cargus AWB data
-     */
-    async convertShopifyOrderToAwbWithCustomPackage(order, packageInfo, carrier, service, customShippingAddress, codAmount, insuranceValue, openPackage, saturdayDelivery, morningDelivery, shipmentPayer, observations, envelopes) {
-        // Use custom shipping address if provided, otherwise fall back to order address
-        let address;
-        if (customShippingAddress && customShippingAddress.firstName) {
-            address = customShippingAddress;
-        } else {
-            const shippingAddress = order.shipping_address;
-            const billingAddress = order.billing_address;
-            address = shippingAddress || billingAddress;
-        }
-
-        if (!address) {
-            throw new Error('No shipping address found');
-        }
-
-        // Use custom package weight from payload
-        const totalWeight = packageInfo?.weight || 1.0; // Default to 1kg if not provided
-
-        // Map service type to Cargus service ID
-        const serviceId = this.mapServiceToCargusId(service, totalWeight);
-
-        return {
-            pickupStartDate: this.getDefaultPickupStart(),
-            pickupEndDate: this.getDefaultPickupEnd(),
-            sender: {
-                Name: config.cargus.sender.name,
-                CountyName: config.cargus.sender.countyName,
-                LocalityName: config.cargus.sender.localityName,
-                AddressText: config.cargus.sender.addressText,
-                ContactPerson: config.cargus.sender.contactPerson,
-                PhoneNumber: config.cargus.sender.phoneNumber,
-                CodPostal: config.cargus.sender.postalCode,
-                Email: config.cargus.sender.email
-            },
-            recipient: {
-                Name: `${address.firstName || address.first_name} ${address.lastName || address.last_name}`,
-                CountyName: this.mapProvinceToCounty(address.province),
-                LocalityName: await this.validateAndMapLocality(address.city, this.mapProvinceToCounty(address.province)),
-                AddressText: `${address.address1} ${address.address2 || ''}`.trim(),
-                ContactPerson: `${address.firstName || address.first_name} ${address.lastName || address.last_name}`,
-                PhoneNumber: address.phone || order.phone || "0700000000",
-                CodPostal: address.zip,
-                Email: address.email || order.email
-            },
-            parcels: 1, // Always use 1 parcel for this service
-            envelopes: 0, // Set to 0 since service doesn't allow multiple parts
-            totalWeight: Math.max(totalWeight, 0.1), // Minimum 0.1kg
-            serviceId: serviceId,
-            declaredValue: insuranceValue ? parseFloat(insuranceValue) : parseFloat(order.total_price),
-            cashRepayment: codAmount ? parseFloat(codAmount) : 0,
-            openPackage: openPackage || false,
-            saturdayDelivery: saturdayDelivery || false,
-            morningDelivery: morningDelivery || false,
-            shipmentPayer: parseInt(shipmentPayer) || 1,
-            observations: observations || `Shopify Order #${order.order_number} - Created via Extension`,
-            packageContent: `Order #${order.order_number} - Package`,
-            parcelCodes: [{
-                Code: "0",
-                Type: 1,
-                Weight: Math.max(totalWeight, 0.1),
-                Length: packageInfo?.length || 20,
-                Width: packageInfo?.width || 15,
-                Height: packageInfo?.height || 10,
-                ParcelContent: `Order #${order.order_number} - Package${(envelopes && envelopes > 0) ? ` + ${envelopes} envelope(s)` : ''}`
-            }]
-        };
-    }
-
-    /**
-     * Map service type to Cargus service ID
-     * @param {string} service - Service type from extension
-     * @param {number} weight - Package weight
-     * @returns {number} Cargus service ID
-     */
-    mapServiceToCargusId(service, weight) {
-        // For now, use the existing weight-based logic from CargusService
-        // You can expand this to handle different service types
-        switch (service) {
-            case 'express':
-                return 1; // Express service
-            case 'overnight':
-                return 2; // Overnight if available
-            case '2day':
-                return 3; // 2-day service if available
-            case 'ground':
-            default:
-                return CargusService.getServiceIdByWeight(weight);
-        }
-    }
-
-    /**
      * Update Shopify order with shipping information
      * @param {string} orderId - Shopify order ID
      * @param {Object} awb - Cargus AWB response
+     * @param {Object} additionalData - Additional shipping data
      */
     async updateShopifyOrderWithShippingInfo(orderId, awb, additionalData = {}) {
-        const currentDate = new Date().toISOString();
-
         const metafields = [
             {
                 namespace: 'shipping',
-                key: 'awb_barcode',
+                key: 'awb_number',
                 value: awb.BarCode || 'N/A',
                 type: 'single_line_text_field'
             },
             {
                 namespace: 'shipping',
-                key: 'awb_id',
-                value: (awb.AwbId || awb.Id || awb.awbId || awb.OrderId || 'N/A').toString(),
+                key: 'courier_company',
+                value: this.shippingAdapter.getCarrierName(),
                 type: 'single_line_text_field'
             },
             {
                 namespace: 'shipping',
                 key: 'tracking_url',
-                value: `https://urgentcargus.ro/tracking-colet/${awb.BarCode || 'N/A'}`,
+                value: this.shippingAdapter.getTrackingUrl(awb.BarCode || 'N/A'),
                 type: 'url'
-            },
-            {
-                namespace: 'shipping',
-                key: 'courier_service',
-                value: 'Cargus',
-                type: 'single_line_text_field'
-            },
-            {
-                namespace: 'shipping',
-                key: 'label_created_at',
-                value: currentDate,
-                type: 'date_time'
-            },
-            {
-                namespace: 'shipping',
-                key: 'shipping_cost',
-                value: (awb.Cost || awb.TotalCost || 0).toString(),
-                type: 'number_decimal'
-            },
-            {
-                namespace: 'shipping_details',
-                key: 'package_weight',
-                value: (additionalData.weight || 0).toString(),
-                type: 'number_decimal'
-            },
-            {
-                namespace: 'shipping_details',
-                key: 'package_dimensions',
-                value: `${additionalData.length || 0}x${additionalData.width || 0}x${additionalData.height || 0}cm`,
-                type: 'single_line_text_field'
-            },
-            {
-                namespace: 'shipping_details',
-                key: 'service_type',
-                value: additionalData.service || 'standard',
-                type: 'single_line_text_field'
-            },
-            {
-                namespace: 'shipping_details',
-                key: 'cod_amount',
-                value: (additionalData.codAmount || 0).toString(),
-                type: 'number_decimal'
-            },
-            {
-                namespace: 'shipping_details',
-                key: 'insurance_value',
-                value: (additionalData.insuranceValue || 0).toString(),
-                type: 'number_decimal'
-            },
-            {
-                namespace: 'shipping_details',
-                key: 'envelope_count',
-                value: (additionalData.envelopes || 0).toString(),
-                type: 'number_integer'
-            },
-            {
-                namespace: 'shipping_options',
-                key: 'open_package',
-                value: (additionalData.openPackage || false).toString(),
-                type: 'boolean'
-            },
-            {
-                namespace: 'shipping_options',
-                key: 'saturday_delivery',
-                value: (additionalData.saturdayDelivery || false).toString(),
-                type: 'boolean'
-            },
-            {
-                namespace: 'shipping_options',
-                key: 'morning_delivery',
-                value: (additionalData.morningDelivery || false).toString(),
-                type: 'boolean'
-            },
-            {
-                namespace: 'shipping_options',
-                key: 'shipment_payer',
-                value: (additionalData.shipmentPayer || 1).toString(),
-                type: 'single_line_text_field'
-            },
-            {
-                namespace: 'shipping_notes',
-                key: 'observations',
-                value: additionalData.observations || '',
-                type: 'multi_line_text_field'
-            },
-            {
-                namespace: 'shipping_raw',
-                key: 'cargus_response',
-                value: JSON.stringify(awb),
-                type: 'json'
             }
         ];
 
         await this.shopifyService.updateOrderMetafields(orderId, metafields);
 
-        // Add multiple tags for better organization
-        const tags = ['SHIPPING_LABEL_CREATED', 'CARGUS_SHIPMENT'];
-        if (additionalData.codAmount && parseFloat(additionalData.codAmount) > 0) {
-            tags.push('COD_SHIPMENT');
-        }
-        if (additionalData.envelopes && parseInt(additionalData.envelopes) > 0) {
-            tags.push('MULTI_PACKAGE');
-        }
+        // Add shipping tags for better organization
+        const tags = [
+            'SHIPPING_LABEL_CREATED',
+            `${this.shippingAdapter.getCarrierName().toUpperCase()}_SHIPMENT`
+        ];
 
         for (const tag of tags) {
             await this.shopifyService.tagOrder(orderId, tag);
         }
     }
-
-    /**
-     * Map Shopify province to Romanian county
-     * @param {string} province - Shopify province
-     * @returns {string} Romanian county name
-     */
-    mapProvinceToCounty(province) {
-        const mapping = {
-            'Bucuresti': 'Bucuresti',
-            'Alba': 'Alba',
-            'Arad': 'Arad',
-            'Arges': 'Arges',
-            'Bacau': 'Bacau',
-            'Bihor': 'Bihor',
-            'Bistrita-Nasaud': 'Bistrita-Nasaud',
-            'Botosani': 'Botosani',
-            'Braila': 'Braila',
-            'Brasov': 'Brasov',
-            'Buzau': 'Buzau',
-            'Calarasi': 'Calarasi',
-            'Caras-Severin': 'Caras-Severin',
-            'Cluj': 'Cluj',
-            'Constanta': 'Constanta',
-            'Covasna': 'Covasna',
-            'Dambovita': 'Dambovita',
-            'Dolj': 'Dolj',
-            'Galati': 'Galati',
-            'Giurgiu': 'Giurgiu',
-            'Gorj': 'Gorj',
-            'Harghita': 'Harghita',
-            'Hunedoara': 'Hunedoara',
-            'Ialomita': 'Ialomita',
-            'Iasi': 'Iasi',
-            'Ilfov': 'Ilfov',
-            'Maramures': 'Maramures',
-            'Mehedinti': 'Mehedinti',
-            'Mures': 'Mures',
-            'Neamt': 'Neamt',
-            'Olt': 'Olt',
-            'Prahova': 'Prahova',
-            'Salaj': 'Salaj',
-            'Satu-Mare': 'Satu-Mare',
-            'Sibiu': 'Sibiu',
-            'Suceava': 'Suceava',
-            'Teleorman': 'Teleorman',
-            'Timis': 'Timis',
-            'Tulcea': 'Tulcea',
-            'Valcea': 'Valcea',
-            'Vaslui': 'Vaslui',
-            'Vrancea': 'Vrancea'
-        };
-
-        return mapping[province] || province || 'Bucuresti';
-    }
-
-    /**
-     * Get default pickup start time (next business day 9 AM)
-     * @returns {string} ISO datetime string
-     */
-    getDefaultPickupStart() {
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        tomorrow.setHours(9, 0, 0, 0);
-        return tomorrow.toISOString().slice(0, 16); // Format: YYYY-MM-DDTHH:mm
-    }
-
-    /**
-     * Get default pickup end time (next business day 5 PM)
-     * @returns {string} ISO datetime string
-     */
-    getDefaultPickupEnd() {
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        tomorrow.setHours(17, 0, 0, 0);
-        return tomorrow.toISOString().slice(0, 16); // Format: YYYY-MM-DDTHH:mm
-    }
-
-    /**
-     * Validate and map locality name against Cargus database
-     * @param {string} cityName - City name from address
-     * @param {string} countyName - County name
-     * @returns {Promise<string>} Validated locality name
-     */
-    async validateAndMapLocality(cityName, countyName) {
-        if (!cityName) {
-            throw new Error('City name is required');
-        }
-
-        try {
-            // First, try to get the county ID for the county name
-            const countries = await this.cargusService.getCountries();
-            const romania = countries.find(c => c.Abbreviation === 'RO' || c.CountryName === 'Romania');
-
-            if (!romania) {
-                logger.warn('Romania not found in countries list, using default locality');
-                return cityName; // Fallback to original city name
-            }
-
-            const counties = await this.cargusService.getCounties(romania.CountryId);
-            const county = counties.find(c =>
-                c.Name === countyName ||
-                c.Abbreviation === countyName ||
-                c.Name.toLowerCase() === countyName.toLowerCase()
-            );
-
-            if (!county) {
-                logger.warn({ cityName, countyName }, 'County not found, using original city name');
-                return cityName;
-            }
-
-            // Get localities for this county
-            const localities = await this.cargusService.getLocalities(romania.CountryId, county.CountyId);
-
-            // Try exact match first
-            let locality = localities.find(l => l.Name.toLowerCase() === cityName.toLowerCase());
-
-            // If no exact match, try partial match
-            if (!locality) {
-                locality = localities.find(l =>
-                    l.Name.toLowerCase().includes(cityName.toLowerCase()) ||
-                    cityName.toLowerCase().includes(l.Name.toLowerCase())
-                );
-            }
-
-            if (locality) {
-                logger.info({ originalCity: cityName, mappedCity: locality.Name }, 'Successfully mapped locality');
-                return locality.Name;
-            } else {
-                logger.warn({ cityName, countyName, availableLocalities: localities.slice(0, 5).map(l => l.Name) }, 'Locality not found in Cargus database, using original name');
-                return cityName;
-            }
-
-        } catch (error) {
-            logger.error({ error: error.message, cityName, countyName }, 'Failed to validate locality, using original name');
-            return cityName; // Fallback to original city name
-        }
-    }
-
 }
 
 export default new ShippingLabelController();
