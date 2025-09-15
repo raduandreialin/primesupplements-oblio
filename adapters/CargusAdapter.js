@@ -134,7 +134,6 @@ class CargusAdapter extends BaseAdapter {
                     Id: awbId,
                     BarCode: awb.toString(),
                     Status: 'Created',
-                    // Add placeholder fields that might be useful
                     Cost: null,
                     TotalCost: null,
                     CreationDate: new Date().toISOString()
