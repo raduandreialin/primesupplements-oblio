@@ -1,22 +1,23 @@
 import express from 'express';
 import ShippingLabelController from '../controllers/ShippingLabelController.js';
+import InvoiceController from '../controllers/InvoiceController.js';
 import verifyShopifyWebhook, { captureRawBody } from '../middlewares/verifyShopifyWebhook.js';
 import verifyShopifySession from '../middlewares/verifyShopifySession.js';
 
 const router = express.Router();
 
-// Secure route with HMAC verification for admin actions
+// Invoice creation route with HMAC verification for webhooks
 router.post('/create',
     express.raw({ type: 'application/json', verify: captureRawBody }),
     verifyShopifyWebhook,
-    ShippingLabelController.createFromShopifyOrder.bind(ShippingLabelController)
+    InvoiceController.createFromShopifyOrder.bind(InvoiceController)
 );
 
-// Main Cargus fulfillment endpoint for extensions (with session verification and JSON parsing)
+// Main shipping endpoint for extensions (with session verification and JSON parsing)
 router.post('/fulfillment/create/cargus',
     express.json(),
     verifyShopifySession,
-    ShippingLabelController.fulfillOrder.bind(ShippingLabelController)
+    ShippingLabelController.createFromExtension.bind(ShippingLabelController)
 );
 
 

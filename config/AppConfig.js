@@ -18,18 +18,19 @@ const config = {
     },
     cargus: {
         baseURL: "https://urgentcargus.azure-api.net/api",
+        trackingURL: "https://urgentcargus.ro/tracking-colet/",
         subscriptionKey: process.env.CARGUS_SUBSCRIPTION_KEY,
         username: process.env.CARGUS_USERNAME,
         password: process.env.CARGUS_PASSWORD,
         sender: {
-            name: process.env.CARGUS_SENDER_NAME || "Prime Supplements",
-            countyName: process.env.CARGUS_SENDER_COUNTY || "Bucuresti",
-            localityName: process.env.CARGUS_SENDER_LOCALITY || "Bucuresti",
-            addressText: process.env.CARGUS_SENDER_ADDRESS || "Your Company Address",
-            contactPerson: process.env.CARGUS_SENDER_CONTACT || "Contact Person",
-            phoneNumber: process.env.CARGUS_SENDER_PHONE || "0723000000",
-            postalCode: process.env.CARGUS_SENDER_POSTAL || "010101",
-            email: process.env.CARGUS_SENDER_EMAIL || "contact@primesupplements.ro"
+            name: "PRIME SUPPLEMENTS",
+            countyName: "Sibiu",
+            localityName: "Sibiu",
+            addressText: "Strada Cuptorului Nr. 10",
+            contactPerson: "PRIME SUPPLEMENTS",
+            phoneNumber: "0747866049",
+            postalCode: "550104",
+            email: "contact@primesupplements.ro"
         }
     }
 };
