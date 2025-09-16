@@ -75,12 +75,18 @@ router.get('/orders/:orderId/invoice-url', async (req, res) => {
         
         logger.info({ orderId, invoiceUrl, invoiceNumber }, 'Invoice URL found');
         
-        res.json({
+        // Use proxy endpoint for invoice document (handles Oblio CORS)
+        const proxyInvoiceUrl = `https://primesupplements-oblio-production.up.railway.app/api/invoice-document/${orderId}?url=${encodeURIComponent(invoiceUrl)}`;
+        
+        const response = {
             success: true,
-            invoiceUrl,
+            invoiceUrl: proxyInvoiceUrl,
             invoiceNumber,
             orderId
-        });
+        };
+        
+        logger.info({ response }, 'Sending invoice response with proxy URL');
+        res.json(response);
         
     } catch (error) {
         logger.error({ orderId: req.params.orderId, error: error.message }, 'Failed to get invoice URL');
@@ -122,7 +128,7 @@ router.get('/orders/:orderId/awb-url', async (req, res) => {
             if (awbNumberAttr) {
                 awbNumber = awbNumberAttr.value;
                 // Use our proxy endpoint for AWB document (handles Cargus authentication)
-                awbUrl = `/api/awb-document/${awbNumber}`;
+                awbUrl = `https://primesupplements-oblio-production.up.railway.app/api/awb-document/${awbNumber}`;
             }
         }
         
@@ -132,7 +138,7 @@ router.get('/orders/:orderId/awb-url', async (req, res) => {
             if (fulfillment && fulfillment.tracking_number) {
                 awbNumber = fulfillment.tracking_number;
                 // Use our proxy endpoint for AWB document (handles Cargus authentication)
-                awbUrl = `/api/awb-document/${awbNumber}`;
+                awbUrl = `https://primesupplements-oblio-production.up.railway.app/api/awb-document/${awbNumber}`;
             }
         }
         
@@ -215,6 +221,91 @@ router.get('/awb-document/:awbNumber', async (req, res) => {
         res.status(500).json({
             success: false,
             error: 'Failed to retrieve AWB document'
+        });
+    }
+});
+
+/**
+ * Proxy endpoint to serve invoice documents from Oblio
+ * GET /api/invoice-document/:orderId?url={invoiceUrl}
+ */
+router.get('/invoice-document/:orderId', async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const { url } = req.query;
+        
+        if (!url) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invoice URL parameter is required'
+            });
+        }
+        
+        logger.info({ orderId, url }, 'Fetching invoice document from Oblio');
+        
+        // Fetch the invoice document from Oblio
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+            logger.error({ orderId, url, status: response.status }, 'Failed to fetch invoice from Oblio');
+            return res.status(404).json({
+                success: false,
+                error: 'Invoice document not found'
+            });
+        }
+        
+        // Get the content type from Oblio response
+        const contentType = response.headers.get('content-type') || 'application/pdf';
+        
+        // Set appropriate headers for PDF
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', `inline; filename="Invoice-${orderId}.pdf"`);
+        
+        // Stream the response from Oblio to the client
+        const buffer = await response.arrayBuffer();
+        res.send(Buffer.from(buffer));
+        
+        logger.info({ orderId, contentType, size: buffer.byteLength }, 'Invoice document served successfully');
+        
+    } catch (error) {
+        logger.error({ orderId: req.params.orderId, error: error.message }, 'Failed to fetch invoice document');
+        res.status(500).json({
+            success: false,
+            error: 'Failed to retrieve invoice document'
+        });
+    }
+});
+
+/**
+ * Combined documents endpoint - serves both invoice and AWB in one PDF
+ * GET /api/combined-documents?invoice={invoiceUrl}&awb={awbUrl}
+ */
+router.get('/combined-documents', async (req, res) => {
+    try {
+        const { invoice, awb } = req.query;
+        
+        if (!invoice && !awb) {
+            return res.status(400).json({
+                success: false,
+                error: 'At least one document URL is required'
+            });
+        }
+        
+        logger.info({ invoice, awb }, 'Creating combined document');
+        
+        // For now, redirect to the first available document
+        // In the future, you could implement PDF merging here
+        if (invoice) {
+            return res.redirect(invoice);
+        } else if (awb) {
+            return res.redirect(awb);
+        }
+        
+    } catch (error) {
+        logger.error({ error: error.message }, 'Failed to create combined document');
+        res.status(500).json({
+            success: false,
+            error: 'Failed to create combined document'
         });
     }
 });

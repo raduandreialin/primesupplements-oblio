@@ -221,6 +221,86 @@ export default class ShopifyService {
     }
 
     /**
+     * Get current order custom attributes
+     * @param {string|number} orderId - Shopify order ID
+     * @returns {Promise<Array>} Array of existing custom attributes
+     */
+    async getOrderCustomAttributes(orderId) {
+        try {
+            const gqlOrderId = `gid://shopify/Order/${orderId}`;
+            
+            const query = `
+                query GetOrderCustomAttributes($id: ID!) {
+                    order(id: $id) {
+                        id
+                        customAttributes {
+                            key
+                            value
+                        }
+                    }
+                }
+            `;
+            
+            const variables = { id: gqlOrderId };
+            const response = await this.graphQLQuery(query, variables);
+            
+            if (!response.order) {
+                throw new Error(`Order ${orderId} not found`);
+            }
+            
+            return response.order.customAttributes || [];
+            
+        } catch (error) {
+            logger.error({ orderId, error: error.message }, 'Failed to get order custom attributes');
+            throw error;
+        }
+    }
+
+    /**
+     * Merge custom attributes with existing ones (preserves existing data)
+     * @param {string|number} orderId - Shopify order ID
+     * @param {Array} newCustomAttributes - Array of new custom attribute objects with key and value
+     * @returns {Promise<Object>} Updated order object
+     */
+    async mergeOrderCustomAttributes(orderId, newCustomAttributes) {
+        try {
+            // Get existing custom attributes
+            const existingAttributes = await this.getOrderCustomAttributes(orderId);
+            
+            // Create a map of existing attributes for easy lookup
+            const existingMap = new Map();
+            existingAttributes.forEach(attr => {
+                existingMap.set(attr.key, attr.value);
+            });
+            
+            // Add/update with new attributes
+            newCustomAttributes.forEach(attr => {
+                existingMap.set(attr.key, attr.value);
+            });
+            
+            // Convert back to array format
+            const mergedAttributes = Array.from(existingMap.entries()).map(([key, value]) => ({
+                key,
+                value
+            }));
+            
+            logger.info({ 
+                orderId, 
+                existingCount: existingAttributes.length,
+                newCount: newCustomAttributes.length,
+                mergedCount: mergedAttributes.length
+            }, 'Merging custom attributes');
+            
+            // Update with merged attributes
+            return await this.updateOrderCustomAttributes(orderId, mergedAttributes);
+            
+        } catch (error) {
+            logger.error({ orderId, newCustomAttributes, error: error.message }, 'Failed to merge order custom attributes');
+            throw error;
+        }
+    }
+
+    /**
      * Set shipping custom attributes on order (AWB number and courier name)
      * @param {string|number} orderId - Shopify order ID
      * @param {string} awbNumber - AWB tracking number
@@ -239,7 +319,7 @@ export default class ShopifyService {
             }
         ];
         
-        return await this.updateOrderCustomAttributes(orderId, customAttributes);
+        return await this.mergeOrderCustomAttributes(orderId, customAttributes);
     }
 
     /**
@@ -270,7 +350,7 @@ export default class ShopifyService {
             });
         }
         
-        return await this.updateOrderCustomAttributes(orderId, customAttributes);
+        return await this.mergeOrderCustomAttributes(orderId, customAttributes);
     }
 
     /**
