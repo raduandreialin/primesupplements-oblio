@@ -1,15 +1,15 @@
 
 api_version = "2025-04"
 
-# Combined Print Action Extension (Invoice + AWB)
+# Admin Print Extension (Invoice + AWB with checkboxes)
 [[extensions]]
-name = "order-documents-print"
-handle = "order-documents-print"
+name = "admin-print"
+handle = "admin-print"
 type = "ui_extension"
-uid = "order-documents-print-uid-001"
+uid = "admin-print-uid-001"
 
 [[extensions.targeting]]
-module = "./src/OrderDocumentsPrintExtension.tsx"
+module = "./src/AdminPrintExtension.tsx"
 target = "admin.order-details.print-action.render"
 
 

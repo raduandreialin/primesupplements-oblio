@@ -12,14 +12,16 @@ import { useEffect, useState } from "react";
 // The target used here must match the target used in the extension's toml file
 const TARGET = "admin.order-details.print-action.render";
 
-export default reactExtension(TARGET, () => <OrderDocumentsPrintApp />);
+export default reactExtension(TARGET, () => <AdminPrintApp />);
 
-function OrderDocumentsPrintApp() {
+function AdminPrintApp() {
   const { i18n, data } = useApi(TARGET);
   
   // Document availability states
   const [invoiceUrl, setInvoiceUrl] = useState<string | null>(null);
   const [awbUrl, setAwbUrl] = useState<string | null>(null);
+  const [invoiceNumber, setInvoiceNumber] = useState<string | null>(null);
+  const [awbNumber, setAwbNumber] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
@@ -60,6 +62,7 @@ function OrderDocumentsPrintApp() {
           console.log('Invoice response:', invoiceData);
           if (invoiceData.invoiceUrl) {
             setInvoiceUrl(invoiceData.invoiceUrl);
+            setInvoiceNumber(invoiceData.invoiceNumber);
             setPrintInvoice(true); // Auto-select if available
           }
         } else if (invoiceResponse.status === 'fulfilled') {
@@ -79,6 +82,7 @@ function OrderDocumentsPrintApp() {
               fullAwbUrl = `${backendUrl}${fullAwbUrl}`;
             }
             setAwbUrl(fullAwbUrl);
+            setAwbNumber(awbData.awbNumber);
             setPrintAwb(true); // Auto-select if available
           }
         } else if (awbResponse.status === 'fulfilled') {
@@ -86,9 +90,6 @@ function OrderDocumentsPrintApp() {
         } else {
           console.log('AWB request rejected:', awbResponse.reason);
         }
-        
-        // Note: Error checking will be handled by the component re-render
-        // when state variables are updated
         
       } catch (err) {
         console.error('Error fetching document URLs:', err);
@@ -104,7 +105,7 @@ function OrderDocumentsPrintApp() {
   // Update print URL when selections change
   useEffect(() => {
     if (printInvoice && printAwb && invoiceUrl && awbUrl) {
-      // Both documents selected - create combined URL (we'll need to implement this)
+      // Both documents selected - use combined endpoint
       setPrintUrl(`https://primesupplements-oblio-production.up.railway.app/api/combined-documents?invoice=${encodeURIComponent(invoiceUrl)}&awb=${encodeURIComponent(awbUrl)}`);
     } else if (printInvoice && invoiceUrl) {
       // Only invoice selected
@@ -155,7 +156,7 @@ function OrderDocumentsPrintApp() {
             checked={printInvoice}
             onChange={(value) => setPrintInvoice(value)}
           >
-            {i18n.translate('invoice')}
+            {i18n.translate('invoice')} {invoiceNumber && `(#${invoiceNumber})`}
           </Checkbox>
         )}
         
@@ -165,7 +166,7 @@ function OrderDocumentsPrintApp() {
             checked={printAwb}
             onChange={(value) => setPrintAwb(value)}
           >
-            {i18n.translate('awb')}
+            {i18n.translate('awb')} {awbNumber && `(#${awbNumber})`}
           </Checkbox>
         )}
         

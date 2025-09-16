@@ -277,7 +277,7 @@ router.get('/invoice-document/:orderId', async (req, res) => {
 });
 
 /**
- * Combined documents endpoint - serves both invoice and AWB in one PDF
+ * Combined documents endpoint - serves HTML page that opens both PDFs
  * GET /api/combined-documents?invoice={invoiceUrl}&awb={awbUrl}
  */
 router.get('/combined-documents', async (req, res) => {
@@ -291,15 +291,78 @@ router.get('/combined-documents', async (req, res) => {
             });
         }
         
-        logger.info({ invoice, awb }, 'Creating combined document');
+        logger.info({ invoice, awb }, 'Creating combined document view');
         
-        // For now, redirect to the first available document
-        // In the future, you could implement PDF merging here
-        if (invoice) {
-            return res.redirect(invoice);
-        } else if (awb) {
-            return res.redirect(awb);
+        // Create HTML page that opens both documents
+        const html = `
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Print Documents</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .document { margin: 20px 0; }
+        iframe { width: 100%; height: 600px; border: 1px solid #ccc; }
+        .print-button { 
+            background: #008060; 
+            color: white; 
+            padding: 10px 20px; 
+            border: none; 
+            border-radius: 4px; 
+            cursor: pointer; 
+            margin: 10px 5px;
         }
+        .print-button:hover { background: #006b4f; }
+    </style>
+</head>
+<body>
+    <h1>Order Documents</h1>
+    
+    ${invoice ? `
+    <div class="document">
+        <h2>Invoice</h2>
+        <button class="print-button" onclick="printDocument('${invoice}')">Print Invoice</button>
+        <iframe src="${invoice}" title="Invoice"></iframe>
+    </div>
+    ` : ''}
+    
+    ${awb ? `
+    <div class="document">
+        <h2>Shipping Label (AWB)</h2>
+        <button class="print-button" onclick="printDocument('${awb}')">Print AWB</button>
+        <iframe src="${awb}" title="AWB"></iframe>
+    </div>
+    ` : ''}
+    
+    ${invoice && awb ? `
+    <div style="text-align: center; margin: 20px;">
+        <button class="print-button" onclick="printAll()" style="font-size: 16px;">Print All Documents</button>
+    </div>
+    ` : ''}
+    
+    <script>
+        function printDocument(url) {
+            const printWindow = window.open(url, '_blank');
+            printWindow.onload = function() {
+                printWindow.print();
+            };
+        }
+        
+        function printAll() {
+            ${invoice ? `printDocument('${invoice}');` : ''}
+            ${awb ? `setTimeout(() => printDocument('${awb}'), 1000);` : ''}
+        }
+        
+        // Auto-print all if both documents are present
+        window.onload = function() {
+            ${invoice && awb ? 'setTimeout(printAll, 1000);' : ''}
+        };
+    </script>
+</body>
+</html>`;
+        
+        res.setHeader('Content-Type', 'text/html');
+        res.send(html);
         
     } catch (error) {
         logger.error({ error: error.message }, 'Failed to create combined document');
