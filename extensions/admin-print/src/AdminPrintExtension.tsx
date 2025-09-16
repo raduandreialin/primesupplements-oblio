@@ -63,7 +63,7 @@ function AdminPrintApp() {
           if (invoiceData.invoiceUrl) {
             setInvoiceUrl(invoiceData.invoiceUrl);
             setInvoiceNumber(invoiceData.invoiceNumber);
-            setPrintInvoice(true); // Auto-select if available
+            setPrintInvoice(true); // Auto-select first available
           }
         } else if (invoiceResponse.status === 'fulfilled') {
           console.log('Invoice request failed:', invoiceResponse.value.status, await invoiceResponse.value.text());
@@ -83,7 +83,10 @@ function AdminPrintApp() {
             }
             setAwbUrl(fullAwbUrl);
             setAwbNumber(awbData.awbNumber);
-            setPrintAwb(true); // Auto-select if available
+            // Only auto-select AWB if invoice is not available
+            if (!invoiceUrl) {
+              setPrintAwb(true);
+            }
           }
         } else if (awbResponse.status === 'fulfilled') {
           console.log('AWB request failed:', awbResponse.value.status, await awbResponse.value.text());
@@ -104,14 +107,11 @@ function AdminPrintApp() {
 
   // Update print URL when selections change
   useEffect(() => {
-    if (printInvoice && printAwb && invoiceUrl && awbUrl) {
-      // Both documents selected - use combined endpoint
-      setPrintUrl(`https://primesupplements-oblio-production.up.railway.app/api/combined-documents?invoice=${encodeURIComponent(invoiceUrl)}&awb=${encodeURIComponent(awbUrl)}`);
-    } else if (printInvoice && invoiceUrl) {
-      // Only invoice selected
+    if (printInvoice && invoiceUrl) {
+      // Invoice selected
       setPrintUrl(invoiceUrl);
     } else if (printAwb && awbUrl) {
-      // Only AWB selected
+      // AWB selected
       setPrintUrl(awbUrl);
     } else {
       // Nothing selected
@@ -154,7 +154,10 @@ function AdminPrintApp() {
           <Checkbox
             name="print-invoice"
             checked={printInvoice}
-            onChange={(value) => setPrintInvoice(value)}
+            onChange={(value) => {
+              setPrintInvoice(value);
+              if (value) setPrintAwb(false); // Only one can be selected
+            }}
           >
             {i18n.translate('invoice')} {invoiceNumber && `(#${invoiceNumber})`}
           </Checkbox>
@@ -164,7 +167,10 @@ function AdminPrintApp() {
           <Checkbox
             name="print-awb"
             checked={printAwb}
-            onChange={(value) => setPrintAwb(value)}
+            onChange={(value) => {
+              setPrintAwb(value);
+              if (value) setPrintInvoice(false); // Only one can be selected
+            }}
           >
             {i18n.translate('awb')} {awbNumber && `(#${awbNumber})`}
           </Checkbox>
