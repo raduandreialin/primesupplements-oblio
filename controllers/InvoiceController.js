@@ -73,7 +73,15 @@ class InvoiceController {
                     oblioResponse.data?.seriesName || process.env.OBLIO_INVOICE_SERIES
                 );
                 
-                console.log(`📋 Invoice metafields set for order ${order.name} - URL: ${invoiceUrl}`);
+                // Set invoice custom attributes
+                await this.shopifyService.setInvoiceCustomAttributes(
+                    order.id,
+                    oblioResponse.data?.number || 'unknown',
+                    invoiceUrl,
+                    oblioResponse.data?.seriesName || process.env.OBLIO_INVOICE_SERIES
+                );
+                
+                console.log(`📋 Invoice metafields and custom attributes set for order ${order.name} - URL: ${invoiceUrl}`);
                 
             } catch (shopifyError) {
                 // Don't fail the whole process if Shopify updates fail
@@ -180,7 +188,15 @@ class InvoiceController {
                     oblioResponse.data?.seriesName || process.env.OBLIO_INVOICE_SERIES
                 );
                 
-                console.log(`📋 Invoice metafields set for order ${order.name} - URL: ${invoiceUrl}`);
+                // Set invoice custom attributes
+                await this.shopifyService.setInvoiceCustomAttributes(
+                    order.id,
+                    oblioResponse.data?.number || 'unknown',
+                    invoiceUrl,
+                    oblioResponse.data?.seriesName || process.env.OBLIO_INVOICE_SERIES
+                );
+                
+                console.log(`📋 Invoice metafields and custom attributes set for order ${order.name} - URL: ${invoiceUrl}`);
                 
             } catch (shopifyError) {
                 console.warn(`⚠️ Failed to update Shopify order ${order.id} (invoice still created): ${shopifyError.message}`);

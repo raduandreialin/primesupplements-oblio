@@ -1,6 +1,8 @@
 import Shopify from "shopify-api-node";
 import config from "../config/AppConfig.js";
 import { logger } from "../utils/index.js";
+import { GET_ORDER_WITH_FULFILLMENT_ORDERS, FIND_UNFULFILLED_ORDERS } from "../graphql/queries.js";
+import { ORDER_UPDATE, ORDER_UPDATE_CUSTOM_ATTRIBUTES, FULFILLMENT_CREATE_V2 } from "../graphql/mutations.js";
 
 export default class ShopifyService {
     constructor(shopName, accessToken) {
@@ -87,29 +89,7 @@ export default class ShopifyService {
             // Convert numeric orderId to GraphQL ID format
             const gqlOrderId = `gid://shopify/Order/${orderId}`;
             
-            const mutation = `
-                mutation OrderUpdate($input: OrderInput!) {
-                    orderUpdate(input: $input) {
-                        order {
-                            id
-                            metafields(first: 10) {
-                                edges {
-                                    node {
-                                        namespace
-                                        key
-                                        value
-                                        type
-                                    }
-                                }
-                            }
-                        }
-                        userErrors {
-                            field
-                            message
-                        }
-                    }
-                }
-            `;
+            const mutation = ORDER_UPDATE;
             
             const variables = {
                 input: {
@@ -197,6 +177,103 @@ export default class ShopifyService {
     }
 
     /**
+     * Update order custom attributes using GraphQL
+     * @param {string|number} orderId - Shopify order ID
+     * @param {Array} customAttributes - Array of custom attribute objects with key and value
+     * @returns {Promise<Object>} Updated order object
+     */
+    async updateOrderCustomAttributes(orderId, customAttributes) {
+        try {
+            // Convert numeric orderId to GraphQL ID format
+            const gqlOrderId = `gid://shopify/Order/${orderId}`;
+            
+            const mutation = ORDER_UPDATE_CUSTOM_ATTRIBUTES;
+            
+            const variables = {
+                input: {
+                    id: gqlOrderId,
+                    customAttributes: customAttributes
+                }
+            };
+            
+            const response = await this.graphQLQuery(mutation, variables);
+            const orderUpdate = response.orderUpdate || response?.data?.orderUpdate;
+
+            if (!orderUpdate) {
+                throw new Error('Unexpected GraphQL response shape: missing orderUpdate');
+            }
+
+            if (Array.isArray(orderUpdate.userErrors) && orderUpdate.userErrors.length > 0) {
+                throw new Error(`GraphQL errors: ${JSON.stringify(orderUpdate.userErrors)}`);
+            }
+            
+            logger.info({ 
+                orderId, 
+                customAttributes: customAttributes.map(attr => `${attr.key}: ${attr.value}`) 
+            }, 'Order custom attributes updated successfully');
+            
+            return orderUpdate.order;
+            
+        } catch (error) {
+            logger.error({ orderId, customAttributes, error: error.message }, 'Failed to update order custom attributes');
+            throw error;
+        }
+    }
+
+    /**
+     * Set shipping custom attributes on order (AWB number and courier name)
+     * @param {string|number} orderId - Shopify order ID
+     * @param {string} awbNumber - AWB tracking number
+     * @param {string} courierName - Courier company name
+     * @returns {Promise<Object>} Updated order object
+     */
+    async setShippingCustomAttributes(orderId, awbNumber, courierName) {
+        const customAttributes = [
+            {
+                key: 'AWB_NUMBER',
+                value: awbNumber
+            },
+            {
+                key: 'COURIER_NAME',
+                value: courierName
+            }
+        ];
+        
+        return await this.updateOrderCustomAttributes(orderId, customAttributes);
+    }
+
+    /**
+     * Set invoice custom attributes on order (invoice number and invoice URL)
+     * @param {string|number} orderId - Shopify order ID
+     * @param {string} invoiceNumber - Invoice number
+     * @param {string} invoiceUrl - Invoice URL
+     * @param {string} invoiceSeries - Invoice series (optional)
+     * @returns {Promise<Object>} Updated order object
+     */
+    async setInvoiceCustomAttributes(orderId, invoiceNumber, invoiceUrl, invoiceSeries) {
+        const customAttributes = [
+            {
+                key: 'INVOICE_NUMBER',
+                value: invoiceNumber
+            },
+            {
+                key: 'INVOICE_URL',
+                value: invoiceUrl
+            }
+        ];
+
+        // Add invoice series if provided
+        if (invoiceSeries) {
+            customAttributes.push({
+                key: 'INVOICE_SERIES',
+                value: invoiceSeries
+            });
+        }
+        
+        return await this.updateOrderCustomAttributes(orderId, customAttributes);
+    }
+
+    /**
      * Get order with fulfillment orders for fulfillment processing
      * @param {string|number} orderId - Shopify order ID
      * @returns {Promise<Object>} Order with fulfillment orders
@@ -205,89 +282,7 @@ export default class ShopifyService {
         try {
             const gqlOrderId = `gid://shopify/Order/${orderId}`;
             
-            const query = `
-                query GetOrderWithFulfillmentOrders($id: ID!) {
-                    order(id: $id) {
-                        id
-                        name
-                        email
-                        phone
-                        displayFulfillmentStatus
-                        fulfillable
-                        fulfillments(first: 10) {
-                            id
-                            status
-                            trackingInfo(first: 5) {
-                                company
-                                number
-                                url
-                            }
-                        }
-                        lineItems(first: 50) {
-                            edges {
-                                node {
-                                    id
-                                    name
-                                    quantity
-                                    unfulfilledQuantity
-                                    requiresShipping
-                                    fulfillmentStatus
-                                }
-                            }
-                        }
-                        fulfillmentOrders(first: 10) {
-                            edges {
-                                node {
-                                    id
-                                    status
-                                    requestStatus
-                                    supportedActions {
-                                        action
-                                    }
-                                    destination {
-                                        address1
-                                        address2
-                                        city
-                                        countryCode
-                                        email
-                                        firstName
-                                        lastName
-                                        phone
-                                        province
-                                        zip
-                                    }
-                                    lineItems(first: 50) {
-                                        edges {
-                                            node {
-                                                id
-                                                totalQuantity
-                                                remainingQuantity
-                                                lineItem {
-                                                    id
-                                                    name
-                                                    quantity
-                                                    sku
-                                                    variant {
-                                                        id
-                                                        title
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    assignedLocation {
-                                        name
-                                        location {
-                                            id
-                                            name
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            `;
+            const query = GET_ORDER_WITH_FULFILLMENT_ORDERS;
             
             const variables = { id: gqlOrderId };
             const response = await this.graphQLQuery(query, variables);
@@ -341,25 +336,7 @@ export default class ShopifyService {
             }
             
             // Step 3: Create fulfillment using GraphQL fulfillmentCreateV2 (2025-07 API)
-            const mutation = `
-                mutation FulfillmentCreateV2($fulfillment: FulfillmentV2Input!) {
-                    fulfillmentCreateV2(fulfillment: $fulfillment) {
-                        fulfillment {
-                            id
-                            status
-                            trackingInfo(first: 10) {
-                                company
-                                number
-                                url
-                            }
-                        }
-                        userErrors {
-                            field
-                            message
-                        }
-                    }
-                }
-            `;
+            const mutation = FULFILLMENT_CREATE_V2;
             
             const variables = {
                 fulfillment: {
@@ -450,31 +427,7 @@ export default class ShopifyService {
      */
     async findUnfulfilledOrders(first = 10) {
         try {
-            const query = `
-                query FindUnfulfilledOrders($first: Int!) {
-                    orders(first: $first, query: "fulfillment_status:unfulfilled") {
-                        edges {
-                            node {
-                                id
-                                name
-                                displayFulfillmentStatus
-                                fulfillable
-                                createdAt
-                                lineItems(first: 5) {
-                                    edges {
-                                        node {
-                                            name
-                                            quantity
-                                            unfulfilledQuantity
-                                            requiresShipping
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            `;
+            const query = FIND_UNFULFILLED_ORDERS;
             
             const variables = { first };
             const response = await this.graphQLQuery(query, variables);
@@ -521,6 +474,9 @@ export default class ShopifyService {
             // Set shipping metafields
             const fulfillmentId = fulfillment.id || `fulfillment-${fulfillment.id}`;
             await this.setShippingMetafields(orderId, awbData.BarCode, trackingInfo.trackingUrl, fulfillmentId);
+            
+            // Set shipping custom attributes (AWB and courier name)
+            await this.setShippingCustomAttributes(orderId, awbData.BarCode, 'Cargus');
             
             // Tag order as fulfilled with Cargus
             await this.tagOrder(orderId, 'Fulfilled with Cargus');

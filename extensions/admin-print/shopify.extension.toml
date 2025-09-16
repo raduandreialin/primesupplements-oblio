@@ -1,0 +1,30 @@
+
+api_version = "2025-04"
+
+# Invoice Print Action Extension
+[[extensions]]
+name = "invoice-print"
+handle = "invoice-print"
+type = "ui_extension"
+uid = "invoice-print-action-uid-001"
+
+[[extensions.targeting]]
+module = "./src/InvoicePrintExtension.tsx"
+target = "admin.order-details.print-action.render"
+
+# AWB/Shipping Label Print Action Extension
+[[extensions]]
+name = "awb-print"
+handle = "awb-print"
+type = "ui_extension"
+uid = "awb-print-action-uid-002"
+
+[[extensions.targeting]]
+module = "./src/AwbPrintExtension.tsx"
+target = "admin.order-details.print-action.render"
+
+# Valid extension targets:
+# - admin.order-details.print-action.render
+# - admin.order-index.selection-print-action.render
+# - admin.product-details.print-action.render
+# - admin.product-index.selection-print-action.render

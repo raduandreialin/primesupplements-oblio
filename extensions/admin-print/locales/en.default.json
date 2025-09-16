@@ -1,0 +1,10 @@
+{
+  "warningTitle": "Select Documents to Print",
+  "warningBody": "Choose which documents you want to print for this order.",
+  "documents": "Available Documents",
+  "invoice": "Invoice",
+  "awb": "Shipping Label (AWB)",
+  "noDocuments": "No documents available for this order",
+  "invoiceNotAvailable": "Invoice not yet generated for this order",
+  "awbNotAvailable": "Shipping label not yet created for this order"
+}

@@ -4,6 +4,7 @@ import pinoHttp from 'pino-http';
 import { logger } from './utils/index.js';
 import webhookRoutes from "./routes/webhooks.js";
 import shippingRoutes from "./routes/shipping.js";
+import printRoutes from "./routes/print.js";
 import { captureRawBody } from "./middlewares/verifyShopifyWebhook.js";
 
 const app = express();
@@ -44,6 +45,7 @@ app.use(express.json({ limit: '10mb' }));
 // Routes
 app.use('/webhooks', webhookRoutes);
 app.use('/shipping', shippingRoutes);
+app.use('/api', printRoutes);
 
 // Basic health check
 app.get('/', (req, res) => {

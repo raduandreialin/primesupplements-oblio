@@ -350,6 +350,13 @@ class ShippingLabelController {
 
         await this.shopifyService.updateOrderMetafields(orderId, metafields);
 
+        // Set shipping custom attributes (AWB and courier name)
+        await this.shopifyService.setShippingCustomAttributes(
+            orderId, 
+            awb.BarCode || 'N/A', 
+            this.shippingAdapter.getCarrierName()
+        );
+
         // Add shipping tags for better organization
         const tags = [
             'SHIPPING_LABEL_CREATED',
