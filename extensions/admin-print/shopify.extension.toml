@@ -1,12 +1,12 @@
 
 api_version = "2025-04"
 
-# Admin Print Extension (Invoice + AWB with checkboxes)
+# AWB Print Extension (Shipping Label Only)
 [[extensions]]
-name = "admin-print"
-handle = "admin-print"
+name = "Print AWB"
+handle = "awb-print"
 type = "ui_extension"
-uid = "admin-print-uid-001"
+uid = "awb-print-uid-001"
 
 [[extensions.targeting]]
 module = "./src/AdminPrintExtension.tsx"

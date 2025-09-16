@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "4299dc59259e7b2af70dfe993c63164b"
-name = "primesupplements-admin-actions"
+name = "Primesupplements App"
 application_url = "https://shopify.dev/apps/default-app-home"
 embedded = true
 

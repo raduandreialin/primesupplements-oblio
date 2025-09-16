@@ -1,10 +1,6 @@
 {
-  "warningTitle": "Sélectionner les documents à imprimer",
-  "warningBody": "Choisissez les documents que vous souhaitez imprimer pour cette commande.",
-  "documents": "Documents disponibles",
-  "invoice": "Facture",
+  "printTitle": "Imprimer l'étiquette d'expédition",
+  "printBody": "Prêt à imprimer l'étiquette AWB pour cette commande.",
   "awb": "Étiquette d'expédition (AWB)",
-  "noDocuments": "Aucun document disponible pour cette commande",
-  "invoiceNotAvailable": "Facture pas encore générée pour cette commande",
   "awbNotAvailable": "Étiquette d'expédition pas encore créée pour cette commande"
 }

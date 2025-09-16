@@ -1,0 +1,11 @@
+{
+  "name": "Générer une Facture",
+  "description": "Générer des factures avec Oblio pour les commandes sélectionnées",
+  "invoice": {
+    "title": "Génération de Facture",
+    "subtitle": "Créer une facture avec Oblio",
+    "success": "Facture créée avec succès!",
+    "error": "Échec de la création de la facture",
+    "retry": "Réessayer la Création de Facture"
+  }
+}

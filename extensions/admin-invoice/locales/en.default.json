@@ -1,0 +1,11 @@
+{
+  "name": "Generate Invoice",
+  "description": "Generate invoices with Oblio for selected orders",
+  "invoice": {
+    "title": "Invoice Generation",
+    "subtitle": "Create invoice with Oblio",
+    "success": "Invoice created successfully!",
+    "error": "Failed to create invoice",
+    "retry": "Retry Invoice Creation"
+  }
+}

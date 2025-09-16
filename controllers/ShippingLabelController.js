@@ -1,16 +1,31 @@
-import { AdapterFactory } from '../adapters/index.js';
-import ShopifyService from '../services/ShopifyService.js';
-import config from '../config/AppConfig.js';
+import { 
+    CreateShippingLabelAction,
+    FulfillShopifyOrderAction,
+    UpdateShopifyOrderAction,
+    CancelAwbAction
+} from '../actions/index.js';
 import { logger } from '../utils/index.js';
 
+/**
+ * Shipping Label Controller
+ * 
+ * Orchestrates shipping operations using action classes.
+ * This controller is now focused on HTTP request/response handling
+ * and coordinating actions, following the Single Responsibility Principle.
+ * 
+ * Responsibilities:
+ * - HTTP request/response handling
+ * - Input validation and sanitization
+ * - Action orchestration
+ * - Error handling and logging
+ */
 class ShippingLabelController {
     constructor() {
-        // Default to Cargus adapter, but this can be made configurable
-        this.shippingAdapter = AdapterFactory.createAdapter(AdapterFactory.ADAPTERS.CARGUS);
-        this.shopifyService = new ShopifyService(
-            config.shopify.B2C_SHOPIFY_SHOPNAME,
-            config.shopify.B2C_SHOPIFY_ACCESS_TOKEN
-        );
+        // Initialize actions
+        this.createShippingLabelAction = new CreateShippingLabelAction();
+        this.fulfillOrderAction = new FulfillShopifyOrderAction();
+        this.updateOrderAction = new UpdateShopifyOrderAction();
+        this.cancelAwbAction = new CancelAwbAction();
     }
 
     /**
@@ -22,212 +37,113 @@ class ShippingLabelController {
         try {
             logger.info({ body: req.body }, 'Received shipping label request from extension');
             
-            const { 
-                orderId, 
-                orderNumber, 
-                carrier, 
-                service, 
-                package: packageInfo, 
-                insurance, 
-                insuranceValue, 
-                customShippingAddress, 
-                codAmount,
-                openPackage,
-                saturdayDelivery,
-                morningDelivery,
-                shipmentPayer,
-                observations,
-                envelopes,
-                orderTotal,
-                orderEmail,
-                orderPhone,
-                notifyCustomer = true
-            } = req.body;
+            // Extract and validate request data
+            const requestData = this._extractRequestData(req.body);
+            const validationError = this._validateRequestData(requestData);
             
-            if (!orderId || !orderNumber) {
-                logger.warn({ orderId, orderNumber }, 'Missing required fields');
+            if (validationError) {
+                logger.warn({ requestData, validationError }, 'Invalid request data');
                 return res.status(400).json({
                     success: false,
-                    error: 'Order ID and order number are required'
+                    error: validationError
                 });
             }
 
-            logger.info({ orderId, orderNumber, carrier, service, packageInfo, customShippingAddress }, 'Creating shipping label from extension');
+            const { 
+                orderId, 
+                orderNumber, 
+                numericOrderId,
+                order,
+                packageInfo,
+                service,
+                customShippingAddress,
+                codAmount,
+                insuranceValue,
+                shippingOptions,
+                notifyCustomer
+            } = requestData;
 
-            // Extract numeric order ID from Shopify GID
-            const numericOrderId = orderId.split('/').pop();
-            logger.info({ numericOrderId }, 'Extracted numeric order ID');
+            logger.info({ 
+                orderId: order.id, 
+                orderNumber: order.order_number, 
+                service,
+                carrier: 'Cargus' 
+            }, 'Processing shipping label creation');
 
-            // Create a minimal order object from the payload data
-            const order = {
-                id: numericOrderId,
-                order_number: orderNumber,
-                line_items: [], // We'll use package info instead
-                total_price: orderTotal || insuranceValue || '0',
-                email: orderEmail || customShippingAddress?.email || '',
-                phone: orderPhone || customShippingAddress?.phone || ''
-            };
-            
-            logger.info({ orderId: order.id, orderNumber: order.order_number }, 'Using order data from extension payload');
+            // Step 1: Create shipping label
+            const labelResult = await this.createShippingLabelAction.execute({
+                order,
+                packageInfo,
+                service,
+                customShippingAddress,
+                codAmount,
+                insuranceValue,
+                ...shippingOptions
+            });
 
-            // Convert Shopify order to shipping provider AWB data with custom package info and address
-            logger.info('Converting order to shipping provider AWB data');
-            let awbData;
-            try {
-                awbData = await this.shippingAdapter.convertOrderToAwbData(
-                    order, 
-                    packageInfo, 
-                    service, 
-                    customShippingAddress, 
-                    codAmount, 
-                    insuranceValue,
-                    openPackage,
-                    saturdayDelivery,
-                    morningDelivery,
-                    shipmentPayer,
-                    observations,
-                    envelopes
-                );
-                logger.info({ 
-                    awbData: {
-                        parcels: awbData.parcels,
-                        envelopes: awbData.envelopes,
-                        totalWeight: awbData.totalWeight,
-                        parcelCodesCount: awbData.parcelCodes?.length,
-                        expectedParcelCodes: awbData.parcels + awbData.envelopes,
-                        parcelCodes: awbData.parcelCodes?.map(pc => ({ 
-                            Code: pc.Code, 
-                            Weight: pc.Weight, 
-                            Type: pc.Type,
-                            ParcelContent: pc.ParcelContent
-                        }))
-                    }
-                }, 'Successfully converted to AWB data - parcelCodes should equal parcels + envelopes');
-            } catch (conversionError) {
-                logger.error({ 
-                    error: conversionError.message, 
-                    stack: conversionError.stack,
-                    orderId: order.id,
-                    packageInfo,
-                    customShippingAddress
-                }, 'Failed to convert order to AWB data');
-                throw conversionError;
+            if (!labelResult.success) {
+                throw new Error(`Shipping label creation failed: ${labelResult.error}`);
             }
-            
-            // Create AWB with shipping provider
-            let awb;
+
+            // Step 2: Fulfill order in Shopify (non-blocking)
+            let fulfillmentResult = null;
             try {
-                awb = await this.shippingAdapter.createAwb(awbData);
-            } catch (shippingError) {
-                logger.error({ 
-                    error: shippingError.message, 
-                    stack: shippingError.stack,
-                    statusCode: shippingError.response?.status,
-                    responseData: shippingError.response?.data,
-                    awbDataSummary: {
-                        parcels: awbData.parcels,
-                        envelopes: awbData.envelopes,
-                        totalWeight: awbData.totalWeight,
-                        parcelCodesCount: awbData.parcelCodes?.length,
-                        serviceId: awbData.serviceId,
-                        recipient: {
-                            name: awbData.recipient?.Name,
-                            county: awbData.recipient?.CountyName,
-                            city: awbData.recipient?.LocalityName
-                        }
-                    }
-                }, 'Failed to create AWB with shipping provider - detailed error info');
-                throw shippingError;
-            }
-            
-            // Fulfill the order in Shopify with shipping tracking
-            logger.info('Fulfilling order in Shopify with shipping tracking');
-            let fulfillmentResult;
-            try {
-                fulfillmentResult = await this.shopifyService.fulfillOrderWithCargus(numericOrderId, awb, notifyCustomer);
-                logger.info({
+                fulfillmentResult = await this.fulfillOrderAction.execute({
                     orderId: numericOrderId,
-                    fulfillmentId: fulfillmentResult.fulfillmentId,
-                    awbBarcode: fulfillmentResult.awbBarcode,
-                    trackingUrl: fulfillmentResult.trackingUrl
-                }, 'Order fulfilled successfully with shipping provider');
+                    awb: labelResult.awb,
+                    notifyCustomer,
+                    carrier: labelResult.carrier
+                });
+
+                if (fulfillmentResult.success) {
+                    logger.info({ 
+                        orderId: numericOrderId,
+                        fulfillmentId: fulfillmentResult.fulfillmentId 
+                    }, 'Order fulfilled successfully');
+                } else {
+                    logger.warn({ 
+                        orderId: numericOrderId,
+                        error: fulfillmentResult.error 
+                    }, 'Order fulfillment failed, but AWB was created');
+                }
             } catch (fulfillmentError) {
-                logger.error({
-                    error: fulfillmentError.message,
-                    stack: fulfillmentError.stack,
-                    numericOrderId,
-                    awb
-                }, 'Failed to fulfill order in Shopify, but AWB was created successfully');
-                // Don't throw here - we still want to return the AWB data even if fulfillment fails
-                // The user can manually fulfill or we can retry later
+                logger.error({ 
+                    orderId: numericOrderId,
+                    error: fulfillmentError.message 
+                }, 'Fulfillment action failed');
+                // Continue - we still want to update order and return AWB data
             }
 
-            // Update Shopify order with additional shipping info
-            logger.info('Updating Shopify order with shipping info');
+            // Step 3: Update Shopify order with shipping info (non-blocking)
             try {
-                const additionalData = {
-                    weight: awbData.totalWeight,
-                    length: packageInfo?.length,
-                    width: packageInfo?.width,
-                    height: packageInfo?.height,
-                    service: service,
-                    codAmount: codAmount,
-                    insuranceValue: insuranceValue,
-                    envelopes: envelopes,
-                    openPackage: openPackage,
-                    saturdayDelivery: saturdayDelivery,
-                    morningDelivery: morningDelivery,
-                    shipmentPayer: shipmentPayer,
-                    observations: observations
-                };
+                const additionalData = this._buildAdditionalData(requestData);
+                
+                await this.updateOrderAction.execute({
+                    orderId: numericOrderId,
+                    awb: labelResult.awb,
+                    carrier: labelResult.carrier,
+                    trackingUrl: labelResult.trackingUrl,
+                    additionalData
+                });
 
-                await this.updateShopifyOrderWithShippingInfo(numericOrderId, awb, additionalData);
-                logger.info('Successfully updated Shopify order with shipping info');
+                logger.info({ orderId: numericOrderId }, 'Order updated with shipping info');
             } catch (updateError) {
-                logger.error({
-                    error: updateError.message,
-                    stack: updateError.stack,
-                    numericOrderId,
-                    awb
-                }, 'Failed to update Shopify order with shipping info');
-                // Don't throw here - we still want to return the AWB data even if update fails
+                logger.error({ 
+                    orderId: numericOrderId,
+                    error: updateError.message 
+                }, 'Order update failed');
+                // Continue - we still want to return the AWB data
             }
 
-            // Prepare response data
-            const responseData = {
-                success: true,
-                trackingNumber: awb.BarCode || 'N/A',
-                labelUrl: this.shippingAdapter.getTrackingUrl(awb.BarCode || 'N/A'),
-                cost: awb.Cost || awb.TotalCost || awb.GrandTotal || awb.Price || awb.Total || awb.Amount || 'Contact courier for pricing',
-                awbId: awb.AwbId || awb.Id || awb.awbId || awb.OrderId || awb.TrackingId || 'Generated',
-                orderId: orderId,
-                carrier: this.shippingAdapter.getCarrierName()
-            };
-
-            // Add fulfillment data if successful
-            if (fulfillmentResult) {
-                responseData.fulfillment = {
-                    id: fulfillmentResult.fulfillmentId,
-                    status: 'fulfilled',
-                    trackingUrl: fulfillmentResult.trackingUrl
-                };
-            }
-
+            // Step 4: Prepare and send response
+            const responseData = this._buildResponse(labelResult, fulfillmentResult, orderId);
+            
             logger.info({
                 orderId,
-                awbBarcode: awb.BarCode,
-                awbId: awb.AwbId || awb.Id || awb.awbId || awb.OrderId || 'N/A',
-                fulfillmentId: fulfillmentResult?.fulfillmentId || 'N/A',
-                responseToFrontend: responseData,
-                rawAwbFields: {
-                    BarCode: awb.BarCode,
-                    Cost: awb.Cost,
-                    TotalCost: awb.TotalCost,
-                    GrandTotal: awb.GrandTotal,
-                    AwbId: awb.AwbId,
-                    Id: awb.Id
-                }
-            }, 'Shipping label created and order fulfilled successfully - Response Debug');
+                trackingNumber: labelResult.trackingNumber,
+                fulfillmentSuccess: fulfillmentResult?.success || false,
+                cost: labelResult.cost
+            }, 'Shipping label creation completed successfully');
 
             res.json(responseData);
 
@@ -263,53 +179,28 @@ class ShippingLabelController {
                 trackingNumber: fulfillment.tracking_number
             }, 'Processing Shopify fulfillment cancellation webhook');
 
-            // Check if this fulfillment has a tracking number (AWB)
-            if (!fulfillment.tracking_number) {
-                logger.warn({ fulfillmentId: fulfillment.id }, 'No tracking number found, skipping AWB cancellation');
-                return;
-            }
+            // Process cancellation using action
+            const cancellationResult = await this.cancelAwbAction.processWebhookCancellation(fulfillment);
 
-            // Extract AWB barcode from tracking number
-            const awbBarcode = fulfillment.tracking_number;
-            
-            logger.info({ awbBarcode, fulfillmentId: fulfillment.id }, 'Attempting to cancel AWB');
-
-            // Cancel the AWB using the shipping adapter
-            const cancellationResult = await this.shippingAdapter.cancelAwb(awbBarcode);
-            
-            if (cancellationResult) {
-                logger.info({ 
-                    awbBarcode, 
-                    fulfillmentId: fulfillment.id,
-                    orderId: fulfillment.order_id 
-                }, 'AWB cancelled successfully');
-
-                // Update Shopify order with cancellation info
-                try {
-                    await this.shopifyService.updateOrderMetafields(fulfillment.order_id, [{
-                        namespace: 'shipping',
-                        key: 'awb_cancelled',
-                        value: new Date().toISOString(),
-                        type: 'date_time'
-                    }]);
-                    
-                    await this.shopifyService.tagOrder(fulfillment.order_id, 'AWB_CANCELLED');
-                } catch (metafieldError) {
-                    logger.warn({ error: metafieldError.message }, 'Failed to update cancellation metafields');
+            if (cancellationResult.success) {
+                // Update order with cancellation info
+                if (!cancellationResult.skipped) {
+                    await this.updateOrderAction.addCancellationInfo(
+                        fulfillment.order_id, 
+                        cancellationResult.awbBarcode
+                    );
                 }
             } else {
-                logger.warn({ 
-                    awbBarcode, 
-                    fulfillmentId: fulfillment.id 
-                }, 'AWB cancellation failed - may have already been picked up by courier');
-
-                // Tag order to indicate cancellation attempt failed
-                try {
-                    await this.shopifyService.tagOrder(fulfillment.order_id, 'AWB_CANCELLATION_FAILED');
-                } catch (tagError) {
-                    logger.warn({ error: tagError.message }, 'Failed to add cancellation failed tag');
-                }
+                // Mark cancellation as failed
+                await this.updateOrderAction.markCancellationFailed(fulfillment.order_id);
             }
+
+            logger.info({
+                fulfillmentId: fulfillment.id,
+                orderId: fulfillment.order_id,
+                cancellationSuccess: cancellationResult.success,
+                skipped: cancellationResult.skipped
+            }, 'Fulfillment cancellation webhook processed');
 
         } catch (error) {
             logger.error({ 
@@ -320,52 +211,142 @@ class ShippingLabelController {
         }
     }
 
+    // ==================== PRIVATE HELPER METHODS ====================
+
     /**
-     * Update Shopify order with shipping information
-     * @param {string} orderId - Shopify order ID
-     * @param {Object} awb - Cargus AWB response
-     * @param {Object} additionalData - Additional shipping data
+     * Extract and structure request data
+     * @private
      */
-    async updateShopifyOrderWithShippingInfo(orderId, awb, additionalData = {}) {
-        const metafields = [
-            {
-                namespace: 'shipping',
-                key: 'awb_number',
-                value: awb.BarCode || 'N/A',
-                type: 'single_line_text_field'
-            },
-            {
-                namespace: 'shipping',
-                key: 'courier_company',
-                value: this.shippingAdapter.getCarrierName(),
-                type: 'single_line_text_field'
-            },
-            {
-                namespace: 'shipping',
-                key: 'tracking_url',
-                value: this.shippingAdapter.getTrackingUrl(awb.BarCode || 'N/A'),
-                type: 'url'
-            }
-        ];
-
-        await this.shopifyService.updateOrderMetafields(orderId, metafields);
-
-        // Set shipping custom attributes (AWB and courier name)
-        await this.shopifyService.setShippingCustomAttributes(
+    _extractRequestData(body) {
+        const { 
             orderId, 
-            awb.BarCode || 'N/A', 
-            this.shippingAdapter.getCarrierName()
-        );
+            orderNumber, 
+            carrier, 
+            service, 
+            package: packageInfo, 
+            insurance, 
+            insuranceValue, 
+            customShippingAddress, 
+            codAmount,
+            openPackage,
+            saturdayDelivery,
+            morningDelivery,
+            shipmentPayer,
+            observations,
+            envelopes,
+            orderTotal,
+            orderEmail,
+            orderPhone,
+            notifyCustomer = true
+        } = body;
 
-        // Add shipping tags for better organization
-        const tags = [
-            'SHIPPING_LABEL_CREATED',
-            `${this.shippingAdapter.getCarrierName().toUpperCase()}_SHIPMENT`
-        ];
+        // Extract numeric order ID from Shopify GID
+        const numericOrderId = orderId ? orderId.split('/').pop() : null;
 
-        for (const tag of tags) {
-            await this.shopifyService.tagOrder(orderId, tag);
+        // Create minimal order object from payload data
+        const order = {
+            id: numericOrderId,
+            order_number: orderNumber,
+            line_items: [], // We'll use package info instead
+            total_price: orderTotal || insuranceValue || '0',
+            email: orderEmail || customShippingAddress?.email || '',
+            phone: orderPhone || customShippingAddress?.phone || ''
+        };
+
+        // Group shipping options
+        const shippingOptions = {
+            openPackage,
+            saturdayDelivery,
+            morningDelivery,
+            shipmentPayer,
+            observations,
+            envelopes
+        };
+
+        return {
+            orderId,
+            orderNumber,
+            numericOrderId,
+            order,
+            carrier,
+            service,
+            packageInfo,
+            insurance,
+            insuranceValue,
+            customShippingAddress,
+            codAmount,
+            shippingOptions,
+            orderTotal,
+            orderEmail,
+            orderPhone,
+            notifyCustomer
+        };
+    }
+
+    /**
+     * Validate request data
+     * @private
+     */
+    _validateRequestData({ orderId, orderNumber, numericOrderId }) {
+        if (!orderId || !orderNumber) {
+            return 'Order ID and order number are required';
         }
+
+        if (!numericOrderId) {
+            return 'Invalid order ID format';
+        }
+
+        return null; // No validation errors
+    }
+
+    /**
+     * Build additional data object for order updates
+     * @private
+     */
+    _buildAdditionalData({ 
+        packageInfo, 
+        service, 
+        codAmount, 
+        insuranceValue, 
+        shippingOptions 
+    }) {
+        return {
+            weight: packageInfo?.weight,
+            length: packageInfo?.length,
+            width: packageInfo?.width,
+            height: packageInfo?.height,
+            service,
+            codAmount,
+            insuranceValue,
+            ...shippingOptions
+        };
+    }
+
+    /**
+     * Build response data
+     * @private
+     */
+    _buildResponse(labelResult, fulfillmentResult, orderId) {
+        const responseData = {
+            success: true,
+            trackingNumber: labelResult.trackingNumber,
+            labelUrl: labelResult.trackingUrl,
+            cost: labelResult.cost,
+            awbId: labelResult.awbId,
+            orderId: orderId,
+            carrier: labelResult.carrier
+        };
+
+        // Add fulfillment data if successful
+        if (fulfillmentResult && fulfillmentResult.success) {
+            responseData.fulfillment = {
+                id: fulfillmentResult.fulfillmentId,
+                status: 'fulfilled',
+                trackingUrl: fulfillmentResult.trackingUrl
+            };
+        }
+
+        return responseData;
     }
 }
 

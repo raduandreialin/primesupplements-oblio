@@ -1,32 +1,35 @@
-import OblioService from '../services/OblioService.js';
-import ShopifyService from '../services/ShopifyService.js';
-import AnafService from '../services/AnafService.js';
-import { transformOrderWithAnafEnrichment, formatRomanianAddress, getCompanyNameFromOrder, logger } from '../utils/index.js';
-import config from '../config/AppConfig.js';
-import dotenv from 'dotenv';
-dotenv.config();
+import {
+    CreateInvoiceAction,
+    ValidateCompanyAction,
+    UpdateOrderInvoiceAction,
+    RetryInvoiceAction
+} from '../actions/index.js';
+import { logger } from '../utils/index.js';
 
+/**
+ * Invoice Controller
+ * 
+ * Orchestrates invoice operations using action classes.
+ * This controller is now focused on HTTP request/response handling
+ * and coordinating actions, following the Single Responsibility Principle.
+ * 
+ * Responsibilities:
+ * - HTTP request/response handling
+ * - Input validation and sanitization
+ * - Action orchestration
+ * - Error handling and logging
+ */
 class InvoiceController {
     constructor() {
-        // Initialize Oblio service (singleton pattern)
-        this.oblioService = new OblioService(
-            process.env.OBLIO_EMAIL,
-            process.env.OBLIO_API_TOKEN
-        );
-
-        // Initialize Shopify service (singleton pattern)
-        this.shopifyService = new ShopifyService(
-            config.shopify.B2C_SHOPIFY_SHOPNAME,
-            config.shopify.B2C_SHOPIFY_ACCESS_TOKEN
-        );
-        
-        // Initialize ANAF service for company verification
-        this.anafService = new AnafService();
+        // Initialize actions
+        this.createInvoiceAction = new CreateInvoiceAction();
+        this.validateCompanyAction = new ValidateCompanyAction();
+        this.updateOrderAction = new UpdateOrderInvoiceAction();
+        this.retryInvoiceAction = new RetryInvoiceAction();
     }
-    
 
     /**
-     * Create invoice from Shopify order fulfillment
+     * Create invoice from Shopify order fulfillment (webhook)
      * Always returns 200 to Shopify (webhook acknowledgment)
      */
     async createFromShopifyOrder(req, res) {
@@ -35,92 +38,72 @@ class InvoiceController {
         
         try {
             const order = req.body;
-            console.log(`🛒 Processing Shopify order #${order.name} (ID: ${order.id})`);
+            logger.info({ 
+                orderId: order.id, 
+                orderName: order.name,
+                customerEmail: order.customer?.email 
+            }, 'Processing Shopify order fulfillment webhook for invoice creation');
 
-            // Transform and create invoice with ANAF company verification (retry logic is in OblioService)
-            const invoiceData = await transformOrderWithAnafEnrichment(
+            // Create invoice using action
+            const invoiceResult = await this.createInvoiceAction.execute({
                 order,
-                this.transformShopifyOrderToOblioInvoice.bind(this),
-                this.anafService
-            );
-            if (!invoiceData.products || invoiceData.products.length === 0) {
-                throw new Error('No invoiceable items: all line items removed or non-invoiceable (e.g., free shipping).');
+                anafService: this.validateCompanyAction.anafService
+            });
+
+            if (invoiceResult.success) {
+                logger.info({ 
+                    orderId: order.id,
+                    invoiceNumber: invoiceResult.invoice.number,
+                    customerEmail: order.customer?.email 
+                }, 'Invoice created successfully from webhook');
+
+                // Update order with invoice information
+                await this.updateOrderAction.execute({
+                    orderId: order.id,
+                    invoiceResult,
+                    removeErrorTags: true
+                });
+
+            } else {
+                logger.error({ 
+                    orderId: order.id,
+                    error: invoiceResult.error,
+                    details: invoiceResult.details 
+                }, 'Invoice creation failed from webhook');
+
+                // Update order with error information
+                await this.updateOrderAction.updateWithError({
+                    orderId: order.id,
+                    error: invoiceResult
+                });
             }
 
-            const cleanedInvoiceData = this.sanitizeOblioPayload(invoiceData);
-            const oblioResponse = await this.oblioService.createInvoice(cleanedInvoiceData);
-            
-            console.log(`✅ Invoice #${oblioResponse.data?.number} created successfully for order ${order.name} - Customer: ${order.customer?.email}`);
-            
-            // Tag the order and set metafields in Shopify
-            try {
-                // Tag the order
-                await this.shopifyService.tagOrder(order.id, [
-                    'oblio-invoiced',
-                    `FACTURA-${oblioResponse.data?.number || 'unknown'}`
-                ]);
-                
-                console.log(`🏷️ Order ${order.name} tagged: oblio-invoiced, FACTURA-${oblioResponse.data?.number}`);
-                
-                // Set invoice metafields
-                // Use the actual URL from Oblio response, or construct from response data
-                const invoiceUrl = oblioResponse.data?.link || `https://www.oblio.eu/docs/invoice?cif=${process.env.OBLIO_COMPANY_CIF}&seriesName=${oblioResponse.data?.seriesName || process.env.OBLIO_INVOICE_SERIES}&number=${oblioResponse.data?.number}`;
-                
-                await this.shopifyService.setInvoiceMetafields(
-                    order.id,
-                    oblioResponse.data?.number || 'unknown',
-                    invoiceUrl,
-                    oblioResponse.data?.seriesName || process.env.OBLIO_INVOICE_SERIES
-                );
-                
-                // Set invoice custom attributes
-                await this.shopifyService.setInvoiceCustomAttributes(
-                    order.id,
-                    oblioResponse.data?.number || 'unknown',
-                    invoiceUrl,
-                    oblioResponse.data?.seriesName || process.env.OBLIO_INVOICE_SERIES
-                );
-                
-                console.log(`📋 Invoice metafields and custom attributes set for order ${order.name} - URL: ${invoiceUrl}`);
-                
-            } catch (shopifyError) {
-                // Don't fail the whole process if Shopify updates fail
-                console.warn(`⚠️ Failed to update Shopify order ${order.id} (invoice still created): ${shopifyError.message}`);
-            }
-            
         } catch (error) {
             const orderId = req.body?.id || 'unknown';
             
-            // Log final failure (after all retries in service layer)
-            console.error(`❌ Invoice creation failed permanently for order ${orderId}: ${error.message}`);
-            
-            // Tag the order and set error metafield
-            try {
-                // Tag the order with error status
-                await this.shopifyService.tagOrder(orderId, [
-                    'EROARE FACTURARE',
-                    `error-${new Date().toISOString().split('T')[0]}` // error-2025-01-07
-                ]);
-                
-                console.log(`🚨 Order ${orderId} tagged with error status: EROARE FACTURARE, error-${new Date().toISOString().split('T')[0]}`);
-                
-                // Set error metafield
-                const httpStatus = error.response?.status;
-                const statusMessage = error.response?.data?.statusMessage || error.response?.data?.message;
-                const composedMsg = `Facturare esuata: ${error.message}${httpStatus ? ` (HTTP ${httpStatus})` : ''}${statusMessage ? ` | ${statusMessage}` : ''}. Timestamp: ${new Date().toISOString()}`;
+            logger.error({ 
+                orderId,
+                error: error.message,
+                stack: error.stack 
+            }, 'Webhook processing failed');
 
-                await this.shopifyService.setErrorMetafield(orderId, composedMsg);
-                
-                console.log(`📝 Error metafield set for order ${orderId}: ${composedMsg}`);
-                
-            } catch (shopifyError) {
-                console.warn(`⚠️ Failed to update Shopify order ${orderId} with error status - Shopify: ${shopifyError.message}, Original: ${error.message}`);
+            // Update order with system error
+            try {
+                await this.updateOrderAction.updateWithError({
+                    orderId,
+                    error: { message: `System error: ${error.message}` }
+                });
+            } catch (updateError) {
+                logger.error({ 
+                    orderId,
+                    updateError: updateError.message 
+                }, 'Failed to update order with system error');
             }
         }
     }
 
     /**
-     * Retry invoice creation from Shopify order update
+     * Retry invoice creation from Shopify order update (webhook)
      * Only processes orders with "EROARE FACTURARE" tag
      * Always returns 200 to Shopify (webhook acknowledgment)
      */
@@ -130,305 +113,424 @@ class InvoiceController {
         
         try {
             const order = req.body;
-            
-            // Check if order has error tag - only process if it does
-            const hasErrorTag = order.tags && order.tags.includes('EROARE FACTURARE');
-            const hasSuccessTag = order.tags && (order.tags.includes('oblio-invoiced') || order.tags.includes('FACTURA-'));
-            
-            if (!hasErrorTag) {
-                console.log(`⏭️ Order ${order.name} updated but no EROARE FACTURARE tag - skipping retry`);
-                return;
-            }
-            
-            if (hasSuccessTag) {
-                console.log(`⏭️ Order ${order.name} already has success tags - skipping retry to prevent loop`);
-                return;
-            }
-            
-            console.log(`🔄 Retrying invoice creation for order #${order.name} (ID: ${order.id})`);
+            logger.info({ 
+                orderId: order.id, 
+                orderName: order.name 
+            }, 'Processing Shopify order update webhook for invoice retry');
 
-            // Transform and create invoice with ANAF company verification
-            const invoiceData = await transformOrderWithAnafEnrichment(
-                order,
-                this.transformShopifyOrderToOblioInvoice.bind(this),
-                this.anafService
-            );
-            if (!invoiceData.products || invoiceData.products.length === 0) {
-                throw new Error('No invoiceable items: all line items removed or non-invoiceable (e.g., free shipping).');
+            // Process retry using action
+            const retryResult = await this.retryInvoiceAction.processOrderUpdateForRetry(order);
+
+            if (retryResult.success && !retryResult.skipped) {
+                logger.info({ 
+                    orderId: order.id,
+                    invoiceNumber: retryResult.invoiceResult?.invoice?.number,
+                    retryAttempt: retryResult.retryAttempt 
+                }, 'Invoice retry successful from webhook');
+
+            } else if (retryResult.skipped) {
+                logger.debug({ 
+                    orderId: order.id,
+                    reason: retryResult.reason 
+                }, 'Invoice retry skipped');
+
+            } else {
+                logger.warn({ 
+                    orderId: order.id,
+                    error: retryResult.error,
+                    retryAttempt: retryResult.retryAttempt,
+                    finalFailure: retryResult.finalFailure 
+                }, 'Invoice retry failed from webhook');
             }
 
-            const cleanedInvoiceData = this.sanitizeOblioPayload(invoiceData);
-            const oblioResponse = await this.oblioService.createInvoice(cleanedInvoiceData);
-            
-            console.log(`✅ Invoice #${oblioResponse.data?.number} created successfully for order ${order.name} - Customer: ${order.customer?.email}`);
-            
-            // Success: Clean error tags and add success tags
-            try {
-                // Remove error tags and add success tags
-                const currentTags = order.tags ? order.tags.split(', ').filter(tag => 
-                    !tag.includes('EROARE FACTURARE') && !tag.startsWith('error-')
-                ) : [];
-                
-                const newTags = [
-                    ...currentTags,
-                    'oblio-invoiced',
-                    `FACTURA-${oblioResponse.data?.number || 'unknown'}`
-                ];
-                
-                await this.shopifyService.tagOrder(order.id, newTags);
-                console.log(`🧹 Cleaned error tags and added success tags for order ${order.name}`);
-                
-                // Set invoice metafields
-                const invoiceUrl = oblioResponse.data?.link || `https://www.oblio.eu/docs/invoice?cif=${process.env.OBLIO_COMPANY_CIF}&seriesName=${oblioResponse.data?.seriesName || process.env.OBLIO_INVOICE_SERIES}&number=${oblioResponse.data?.number}`;
-                
-                await this.shopifyService.setInvoiceMetafields(
-                    order.id,
-                    oblioResponse.data?.number || 'unknown',
-                    invoiceUrl,
-                    oblioResponse.data?.seriesName || process.env.OBLIO_INVOICE_SERIES
-                );
-                
-                // Set invoice custom attributes
-                await this.shopifyService.setInvoiceCustomAttributes(
-                    order.id,
-                    oblioResponse.data?.number || 'unknown',
-                    invoiceUrl,
-                    oblioResponse.data?.seriesName || process.env.OBLIO_INVOICE_SERIES
-                );
-                
-                console.log(`📋 Invoice metafields and custom attributes set for order ${order.name} - URL: ${invoiceUrl}`);
-                
-            } catch (shopifyError) {
-                console.warn(`⚠️ Failed to update Shopify order ${order.id} (invoice still created): ${shopifyError.message}`);
-            }
-            
         } catch (error) {
             const orderId = req.body?.id || 'unknown';
             
-            console.error(`❌ Invoice retry failed for order ${orderId}: ${error.message}`);
-            
-            // Update error tag with new timestamp but keep the error status
-            try {
-                const currentTags = req.body.tags ? req.body.tags.split(', ').filter(tag => 
-                    !tag.startsWith('error-')
-                ) : [];
-                
-                const newTags = [
-                    ...currentTags,
-                    `error-${new Date().toISOString().split('T')[0]}-retry`
-                ];
-                
-                await this.shopifyService.tagOrder(orderId, newTags);
-                console.log(`🚨 Updated error tag for retry attempt on order ${orderId}`);
-                
-                // Update error metafield
-                const httpStatus = error.response?.status;
-                const statusMessage = error.response?.data?.statusMessage || error.response?.data?.message;
-                const composedMsg = `Retry facturare esuata: ${error.message}${httpStatus ? ` (HTTP ${httpStatus})` : ''}${statusMessage ? ` | ${statusMessage}` : ''}. Retry timestamp: ${new Date().toISOString()}`;
-
-                await this.shopifyService.setErrorMetafield(orderId, composedMsg);
-                console.log(`📝 Error metafield updated for retry attempt on order ${orderId}: ${composedMsg}`);
-                
-            } catch (shopifyError) {
-                console.warn(`⚠️ Failed to update Shopify order ${orderId} with retry error status - Shopify: ${shopifyError.message}, Original: ${error.message}`);
-            }
+            logger.error({ 
+                orderId,
+                error: error.message,
+                stack: error.stack 
+            }, 'Webhook retry processing failed');
         }
     }
 
     /**
-     * Transform Shopify order to Oblio invoice format
-     * @private
+     * Create invoice from admin extension
+     * @param {Object} req - Express request object
+     * @param {Object} res - Express response object
      */
-    transformShopifyOrderToOblioInvoice(order) {
-        const companyCif = process.env.OBLIO_COMPANY_CIF;
-        
-        // Base products from line items - use original prices and add individual discount lines
-        let products = [];
-        
-        order.line_items.forEach(item => {
-            // Base on original ordered quantity
-            const baseQty = item.quantity || 0;
-
-            // Subtract refunded quantities (if any)
-            const refundedQty = (order.refunds || []).reduce((acc, refund) => {
-                const match = (refund.refund_line_items || []).find(rli => rli?.line_item?.id === item.id);
-                return acc + (match?.quantity || 0);
-            }, 0);
-
-            const finalQty = Math.max(0, baseQty - refundedQty);
-            if (finalQty <= 0) {
-                return;
-            }
-
-            // Use original unit price
-            const unitPrice = parseFloat(item.price);
-
-            // Extract VAT info from line item tax_lines
-            let vatPercentage = 21; // Default Romanian standard rate
-            let vatName = 'Normala'; // Default
+    async createFromExtension(req, res) {
+        try {
+            logger.info({ body: req.body }, 'Received invoice creation request from extension');
             
-            if (item.tax_lines && item.tax_lines.length > 0) {
-                const taxRate = item.tax_lines[0].rate;
-                vatPercentage = Math.round(taxRate * 100);
-                
-                // Map current Romanian VAT rates
-                if (vatPercentage === 21) {
-                    vatName = 'Normala';
-                } else if (vatPercentage === 11) {
-                    vatName = 'Redusa';
-                } else if (vatPercentage === 0) {
-                    vatName = 'SFDD';
-                }
-                
-                console.log(`📊 Item "${item.title}" VAT: ${vatPercentage}% (${vatName})`);
+            // Extract and validate request data
+            const requestData = this._extractRequestData(req.body);
+            const validationError = this._validateRequestData(requestData);
+            
+            if (validationError) {
+                logger.warn({ requestData, validationError }, 'Invalid request data');
+                return res.status(400).json({
+                    success: false,
+                    error: validationError
+                });
             }
 
-            // Add the product line
-            products.push({
-                name: item.title,
-                code: item.sku || item.barcode || String(item.id),
-                price: unitPrice,
-                quantity: finalQty,
-                measuringUnit: 'buc',
-                currency: order.currency,
-                productType: 'Marfa',
-                management: config.oblio.OBLIO_MANAGEMENT,
-                vatName: vatName,
-                vatPercentage: vatPercentage,
-                vatIncluded: order.taxes_included ? 1 : 0
+            const { 
+                orderId, 
+                orderData,
+                invoiceOptions,
+                customClient,
+                validateCompany,
+                skipAnaf
+            } = requestData;
+
+            logger.info({ 
+                orderId, 
+                orderName: orderData.name || orderData.order_number,
+                invoiceOptions,
+                customClient: !!customClient 
+            }, 'Processing invoice creation from extension');
+
+            // Step 1: Validate company if B2B and not skipped
+            let validatedClient = customClient;
+            if (validateCompany && customClient?.cif && !skipAnaf) {
+                try {
+                    const companyValidation = await this.validateCompanyAction.execute({
+                        cif: customClient.cif,
+                        includeInactiveCompanies: invoiceOptions.allowInactiveCompanies
+                    });
+
+                    if (companyValidation.success) {
+                        // Enrich client data with ANAF information
+                        validatedClient = await this.validateCompanyAction.enrichClientData(
+                            customClient, 
+                            customClient.cif
+                        );
+                        logger.info({ 
+                            orderId, 
+                            cif: customClient.cif,
+                            companyName: companyValidation.company.name 
+                        }, 'Company validated successfully with ANAF');
+                    } else {
+                        logger.warn({ 
+                            orderId, 
+                            cif: customClient.cif,
+                            error: companyValidation.error 
+                        }, 'Company validation failed');
+
+                        // Return validation error to user
+                        if (companyValidation.errorType === 'NOT_FOUND' || 
+                            companyValidation.errorType === 'INACTIVE') {
+                            return res.status(400).json({
+                                success: false,
+                                error: companyValidation.error,
+                                errorType: companyValidation.errorType,
+                                companyData: companyValidation.companyData
+                            });
+                        }
+                    }
+                } catch (validationError) {
+                    logger.warn({ 
+                        orderId, 
+                        error: validationError.message 
+                    }, 'Company validation failed, proceeding without ANAF enrichment');
+                }
+            }
+
+            // Step 2: Create invoice
+            const invoiceResult = await this.createInvoiceAction.execute({
+                order: orderData,
+                invoiceOptions,
+                customClient: validatedClient,
+                anafService: skipAnaf ? null : this.validateCompanyAction.anafService
             });
 
-            // Get actual line item discount from Shopify allocations
-            // Always use discount_allocations as the authoritative source
-            let itemDiscount = 0;
-            
-            if (Array.isArray(item.discount_allocations) && item.discount_allocations.length > 0) {
-                itemDiscount = item.discount_allocations.reduce((sum, alloc) => {
-                    return sum + (parseFloat(alloc.amount) || 0);
-                }, 0);
-                console.log(`💰 Item "${item.title}" has discount: ${itemDiscount} ${order.currency}`);
-            }
-            
-            // Add discount as separate line using Oblio discount object format
-            if (itemDiscount > 0) {
-                products.push({
-                    name: `Discount ${item.title}`,
-                    discountType: 'valoric',
-                    discount: itemDiscount,
-                    discountAllAbove: 0
-                });
-                console.log(`🎯 Added discount line: "Discount ${item.title}" - ${itemDiscount} ${order.currency}`);
-            }
-        });
+            if (invoiceResult.success) {
+                logger.info({ 
+                    orderId, 
+                    invoiceNumber: invoiceResult.invoice.number,
+                    invoiceUrl: invoiceResult.invoice.url 
+                }, 'Invoice created successfully from extension');
 
-        // Add shipping if exists
-        if (order.shipping_lines?.length > 0) {
-            const s = order.shipping_lines[0];
-            const shippingPrice = parseFloat((s.discounted_price ?? s.price));
-            if (!isNaN(shippingPrice) && shippingPrice > 0) {
-                products.push({
-                    name: 'Transport',
-                    price: shippingPrice,
-                    quantity: 1,
-                    measuringUnit: 'buc',
-                    currency: order.currency,
-                    productType: 'Serviciu',
-                    management: config.oblio.OBLIO_MANAGEMENT
+                // Step 3: Update order with invoice information
+                try {
+                    await this.updateOrderAction.execute({
+                        orderId,
+                        invoiceResult,
+                        removeErrorTags: true,
+                        additionalTags: ['MANUAL_INVOICE']
+                    });
+                } catch (updateError) {
+                    logger.warn({ 
+                        orderId, 
+                        error: updateError.message 
+                    }, 'Failed to update order, but invoice was created successfully');
+                }
+
+                // Return success response
+                return res.json({
+                    success: true,
+                    invoice: invoiceResult.invoice,
+                    message: 'Invoice created successfully'
+                });
+
+            } else {
+                logger.error({ 
+                    orderId, 
+                    error: invoiceResult.error,
+                    details: invoiceResult.details 
+                }, 'Invoice creation failed from extension');
+
+                // Update order with error information
+                try {
+                    await this.updateOrderAction.updateWithError({
+                        orderId,
+                        error: invoiceResult
+                    });
+                } catch (updateError) {
+                    logger.warn({ 
+                        orderId, 
+                        error: updateError.message 
+                    }, 'Failed to update order with error information');
+                }
+
+                return res.status(400).json({
+                    success: false,
+                    error: invoiceResult.error,
+                    details: invoiceResult.details,
+                    retryable: invoiceResult.retryable
                 });
             }
+
+        } catch (error) {
+            logger.error({ 
+                orderId: req.body?.orderId,
+                error: error.message,
+                stack: error.stack
+            }, 'Failed to create invoice from extension');
+
+            res.status(500).json({
+                success: false,
+                error: 'Failed to create invoice',
+                details: error.message
+            });
         }
+    }
 
-        // Final sanitation: remove invalid/zero items (Oblio may reject them)
-        // Allow negative prices for discount lines
-        products = products.filter(p => {
-            // Regular products need price and quantity
-            const validProduct = p && typeof p.price === 'number' && !isNaN(p.price) && p.quantity > 0;
-            // Discount objects need discount value (no price or quantity required)
-            const validDiscount = p && typeof p.discount === 'number' && !isNaN(p.discount) && p.discount > 0;
+    /**
+     * Retry invoice creation from admin extension
+     * @param {Object} req - Express request object
+     * @param {Object} res - Express response object
+     */
+    async retryFromExtension(req, res) {
+        try {
+            logger.info({ body: req.body }, 'Received invoice retry request from extension');
             
-            const isValid = validProduct || validDiscount;
-            if (!isValid) {
-                // intentionally silent per request to minimize debug logs
+            const { orderId, orderData, retryOptions = {} } = req.body;
+
+            if (!orderId || !orderData) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Order ID and order data are required'
+                });
             }
-            return isValid;
-        });
 
-        // Build address fields per Oblio expected format
-        const billingAddr = order.billing_address ? formatRomanianAddress(order.billing_address) : null;
-        const shippingAddr = !billingAddr && order.shipping_address ? formatRomanianAddress(order.shipping_address) : null;
-        const addr = billingAddr || shippingAddr || { street: '', city: '', state: '', zip: '', country: 'România' };
-        const singleLineAddress = [addr.street, addr.zip, addr.country].filter(Boolean).join(', ');
+            logger.info({ 
+                orderId, 
+                orderName: orderData.name || orderData.order_number 
+            }, 'Processing invoice retry from extension');
 
-        // Build client object (cif/rc will be added by ANAF enrichment if company order)
-        const client = {
-            name: (order.billing_address?.company && (getCompanyNameFromOrder(order) || order.billing_address.company))
-                || `${order.billing_address?.first_name || ''} ${order.billing_address?.last_name || ''}`.trim()
-                || order.customer?.email,
-            code: String(order.customer?.id || order.customer?.email || order.id),
-            address: singleLineAddress,
-            state: addr.state,
-            city: addr.city,
-            country: addr.country,
-            iban: '',
-            bank: '',
-            email: order.customer?.email || '',
-            phone: order.billing_address?.phone || order.shipping_address?.phone || '',
-            contact: `${order.billing_address?.first_name || ''} ${order.billing_address?.last_name || ''}`.trim()
-        };
+            // Execute retry using action
+            const retryResult = await this.retryInvoiceAction.execute({
+                order: orderData,
+                retryAttempt: retryOptions.retryAttempt || 1,
+                maxRetries: retryOptions.maxRetries || 3,
+                retryOptions
+            });
 
-        // Determine if the order is fully paid in Shopify to mark the invoice as collected
-        const isPaid = (order.financial_status || '').toLowerCase() === 'paid';
+            if (retryResult.success) {
+                logger.info({ 
+                    orderId, 
+                    invoiceNumber: retryResult.invoiceResult?.invoice?.number,
+                    retryAttempt: retryResult.retryAttempt 
+                }, 'Invoice retry successful from extension');
 
-        // Prefer the date when the order was processed/paid; fallback to today
-        const collectDateIso = (order.processed_at || order.closed_at || order.updated_at || new Date().toISOString());
-        const collectDate = collectDateIso.split('T')[0];
+                return res.json({
+                    success: true,
+                    invoice: retryResult.invoiceResult?.invoice,
+                    retryAttempt: retryResult.retryAttempt,
+                    strategyUsed: retryResult.strategyUsed,
+                    message: 'Invoice created successfully on retry'
+                });
 
-        // Build collect object only for fully paid orders. Value is optional (defaults to invoice total in Oblio)
-        const collect = isPaid
-            ? {
-                  type: 'Card',
-                  documentNumber: String(order.order_number || order.name || order.id)
-              }
-            : undefined;
-        
+            } else {
+                logger.warn({ 
+                    orderId, 
+                    error: retryResult.error,
+                    retryAttempt: retryResult.retryAttempt,
+                    finalFailure: retryResult.finalFailure 
+                }, 'Invoice retry failed from extension');
+
+                return res.status(400).json({
+                    success: false,
+                    error: retryResult.error,
+                    retryAttempt: retryResult.retryAttempt,
+                    retryable: retryResult.retryable,
+                    finalFailure: retryResult.finalFailure,
+                    strategyUsed: retryResult.strategyUsed
+                });
+            }
+
+        } catch (error) {
+            logger.error({ 
+                orderId: req.body?.orderId,
+                error: error.message,
+                stack: error.stack
+            }, 'Failed to retry invoice from extension');
+
+            res.status(500).json({
+                success: false,
+                error: 'Failed to retry invoice creation',
+                details: error.message
+            });
+        }
+    }
+
+    /**
+     * Get invoice status for order
+     * @param {Object} req - Express request object
+     * @param {Object} res - Express response object
+     */
+    async getInvoiceStatus(req, res) {
+        try {
+            const { orderId } = req.params;
+
+            if (!orderId) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Order ID is required'
+                });
+            }
+
+            logger.debug({ orderId }, 'Getting invoice status');
+
+            const invoiceStatus = await this.updateOrderAction.checkInvoiceStatus(orderId);
+
+            return res.json({
+                success: true,
+                status: invoiceStatus
+            });
+
+        } catch (error) {
+            logger.error({ 
+                orderId: req.params?.orderId,
+                error: error.message
+            }, 'Failed to get invoice status');
+
+            res.status(500).json({
+                success: false,
+                error: 'Failed to get invoice status',
+                details: error.message
+            });
+        }
+    }
+
+    /**
+     * Validate company with ANAF
+     * @param {Object} req - Express request object
+     * @param {Object} res - Express response object
+     */
+    async validateCompany(req, res) {
+        try {
+            const { cif, includeInactiveCompanies = false } = req.body;
+
+            if (!cif) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'CIF is required'
+                });
+            }
+
+            logger.debug({ cif }, 'Validating company with ANAF');
+
+            const validation = await this.validateCompanyAction.execute({
+                cif,
+                includeInactiveCompanies
+            });
+
+            return res.json(validation);
+
+        } catch (error) {
+            logger.error({ 
+                cif: req.body?.cif,
+                error: error.message
+            }, 'Failed to validate company');
+
+            res.status(500).json({
+                success: false,
+                error: 'Failed to validate company',
+                details: error.message
+            });
+        }
+    }
+
+    // ==================== PRIVATE HELPER METHODS ====================
+
+    /**
+     * Extract and structure request data
+     * @private
+     */
+    _extractRequestData(body) {
+        const { 
+            orderId,
+            orderData,
+            invoiceOptions = {},
+            customClient = null,
+            validateCompany = false,
+            skipAnaf = false
+        } = body;
+
         return {
-            cif: companyCif,
-            client,
-            seriesName: process.env.OBLIO_INVOICE_SERIES || 'FCT',
-            issueDate: new Date().toISOString().split('T')[0],
-            language: 'RO',
-            mentions: `Factura emisa pentru comanda ${order.name}`,
-            sendEmail: 1,
-            useStock: 1,
-            collectDate: isPaid ? collectDate : undefined,
-            collect,
-            products
+            orderId,
+            orderData,
+            invoiceOptions: {
+                seriesName: invoiceOptions.seriesName,
+                issueDate: invoiceOptions.issueDate,
+                language: invoiceOptions.language || 'RO',
+                mentions: invoiceOptions.mentions,
+                sendEmail: invoiceOptions.sendEmail,
+                useStock: invoiceOptions.useStock,
+                markAsPaid: invoiceOptions.markAsPaid,
+                paymentMethod: invoiceOptions.paymentMethod,
+                collectDate: invoiceOptions.collectDate,
+                excludeShipping: invoiceOptions.excludeShipping,
+                selectedLineItems: invoiceOptions.selectedLineItems,
+                allowInactiveCompanies: invoiceOptions.allowInactiveCompanies
+            },
+            customClient,
+            validateCompany,
+            skipAnaf
         };
     }
 
     /**
-     * Remove undefined/null values from Oblio payload to avoid API errors
-     * @param {Object} payload - Invoice payload
-     * @returns {Object} - Cleaned payload
+     * Validate request data
+     * @private
      */
-    sanitizeOblioPayload(payload) {
-        const sanitize = (obj) => {
-            if (Array.isArray(obj)) {
-                return obj.map(sanitize);
-            }
-            if (obj && typeof obj === 'object') {
-                const cleaned = {};
-                for (const [key, value] of Object.entries(obj)) {
-                    if (value !== undefined && value !== null) {
-                        cleaned[key] = sanitize(value);
-                    }
-                }
-                return cleaned;
-            }
-            return obj;
-        };
-        
-        return sanitize(payload);
+    _validateRequestData({ orderId, orderData }) {
+        if (!orderId) {
+            return 'Order ID is required';
+        }
+
+        if (!orderData) {
+            return 'Order data is required';
+        }
+
+        if (!orderData.line_items || !Array.isArray(orderData.line_items)) {
+            return 'Order must have line items';
+        }
+
+        return null; // No validation errors
     }
 }
 

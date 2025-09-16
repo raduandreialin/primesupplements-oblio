@@ -1,15 +1,15 @@
-
 api_version = "2025-04"
+
 [[extensions]]
 # Change the merchant-facing name of the extension in locales/en.default.json
-name = "Generate Shipping Label"
-handle = "generate-shipping-label"
+name = "Generate Invoice"
+handle = "generate-invoice"
 type = "ui_extension"
-uid = "b22f6470-f3b7-f24a-fbf9-ed31d9980e8ff353c612"
+uid = "c33f7580-g4c8-g35b-gcga-fe42ea091f9ff464d723"
 
 # Only 1 target can be specified for each Admin action extension
 [[extensions.targeting]]
-module = "./src/ActionExtension.tsx"
+module = "./src/InvoiceExtension.tsx"
 target = "admin.order-details.action.render"
 
 # Valid extension targets:
