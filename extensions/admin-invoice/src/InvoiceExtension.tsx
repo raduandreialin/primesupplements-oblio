@@ -7,9 +7,38 @@ import {
   Button,
   Text,
   Banner,
-  Section,
-  InlineStack
+  Divider
 } from '@shopify/ui-extensions-react/admin';
+
+import { 
+  CompanyLookup, 
+  InvoiceForm, 
+  InvoiceStatus, 
+  InvoiceResultDisplay 
+} from './components';
+
+import {
+  type InvoiceOptions,
+  type CustomClient,
+  type InvoiceStatus as IInvoiceStatus,
+  type InvoiceResult,
+  transformGraphQLOrderToRest,
+  buildClientFromOrder,
+  isB2BOrder,
+  getOrderGraphQLQuery,
+  extractCifFromCompany
+} from './utils/invoiceUtils';
+
+import {
+  type CompanyValidationResult
+} from './utils/anafUtils';
+
+import {
+  createInvoiceRequest,
+  retryInvoiceRequest,
+  getInvoiceStatusRequest,
+  handleApiError
+} from './utils/apiUtils';
 
 // The target used here must match the target used in the extension's toml file
 const TARGET = 'admin.order-details.action.render';
@@ -19,140 +48,97 @@ export default reactExtension(TARGET, () => <App />);
 function App() {
   // The useApi hook provides access to several useful APIs like i18n, close, and data.
   const {i18n, close, data} = useApi(TARGET);
-  const [orderInfo, setOrderInfo] = useState({ id: '', orderNumber: '', name: '', displayFinancialStatus: '', createdAt: '' });
+  
+  // State management
+  const [orderInfo, setOrderInfo] = useState({ id: '', orderNumber: '', name: '' });
+  const [orderData, setOrderData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [invoiceResult, setInvoiceResult] = useState(null);
-  const [invoiceStatus, setInvoiceStatus] = useState(null);
+  
+  // Invoice-related state
+  const [invoiceStatus, setInvoiceStatus] = useState<IInvoiceStatus | null>(null);
+  const [invoiceResult, setInvoiceResult] = useState<InvoiceResult | null>(null);
+  const [invoiceOptions, setInvoiceOptions] = useState<InvoiceOptions>({});
+  const [customClient, setCustomClient] = useState<CustomClient | null>(null);
+  
+  // Company validation state
+  const [companyValidation, setCompanyValidation] = useState<CompanyValidationResult | null>(null);
+  const [showCompanyLookup, setShowCompanyLookup] = useState(false);
+  
+  // UI state
+  const [currentStep, setCurrentStep] = useState<'status' | 'form' | 'result'>('status');
 
   // Extract order information from the selected data provided by Shopify
   useEffect(() => {
     if (data.selected && data.selected.length > 0) {
       const selectedOrder = data.selected[0];
       
-      // Extract order number from the ID (gid://shopify/Order/6898686591274 -> 6898686591274)
-      const orderNumber = selectedOrder.id ? selectedOrder.id.split('/').pop() : 'Unknown';
+      // We'll get the actual order number from the GraphQL query, 
+      // for now use the Shopify ID as a fallback
+      const shopifyId = selectedOrder.id ? selectedOrder.id.split('/').pop() : 'Unknown';
       
       setOrderInfo({
         id: selectedOrder.id || 'Unknown ID',
-        orderNumber: orderNumber,
-        name: `#${orderNumber}`,
-        displayFinancialStatus: '',
-        createdAt: ''
+        orderNumber: shopifyId || 'Unknown',
+        name: `#${shopifyId || 'Unknown'}`
       });
       
-      // Check invoice status
-      checkInvoiceStatus(orderNumber);
-      
-      // Try to get additional order information
-      tryGetBasicOrderInfo(selectedOrder.id);
+      // Initialize the flow
+      initializeInvoiceFlow(selectedOrder.id || '', shopifyId || 'Unknown');
     }
   }, [data.selected]);
 
-  // Check if order already has invoice
+  // Initialize the invoice flow
+  const initializeInvoiceFlow = async (orderId: string, orderNumber: string) => {
+    setLoading(true);
+    setError('');
+
+    try {
+      // Step 1: Check invoice status
+      await checkInvoiceStatus(orderNumber);
+      
+      // Step 2: Get full order data
+      await getFullOrderData(orderId);
+      
+    } catch (error) {
+      setError(handleApiError(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Check invoice status
   const checkInvoiceStatus = async (orderId: string) => {
     try {
-      const backendUrl = 'https://primesupplements-oblio-production.up.railway.app';
-      const response = await fetch(`${backendUrl}/invoice/status/${orderId}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Shopify-Admin-Extension',
-          'X-Shopify-Extension': 'invoice-generator'
-        }
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success) {
-          setInvoiceStatus(result.status);
-        }
+      console.log('Checking invoice status for order:', orderId);
+      const response = await getInvoiceStatusRequest(orderId);
+      console.log('Invoice status response:', response);
+      
+      if (response.success && response.data?.status) {
+        setInvoiceStatus(response.data.status);
+      } else {
+        // Set default status if no invoice exists
+        setInvoiceStatus({
+          hasInvoice: false,
+          hasError: false,
+          status: 'not_invoiced'
+        });
       }
     } catch (error) {
-      console.warn('Failed to check invoice status:', error);
+      console.error('Error checking invoice status:', error);
+      // Set default status on error
+      setInvoiceStatus({
+        hasInvoice: false,
+        hasError: false,
+        status: 'not_invoiced'
+      });
     }
   };
 
-  // Function to try getting basic order information
-  const tryGetBasicOrderInfo = async (orderId: string) => {
+  // Get full order data
+  const getFullOrderData = async (orderId: string) => {
     try {
-      setLoading(true);
-      setError('');
-      
-      // Try a minimal query with basic order info
       const basicOrderQuery = {
-        query: `query Order($id: ID!) {
-          order(id: $id) {
-            name
-            createdAt
-            displayFinancialStatus
-            totalPriceSet {
-              shopMoney {
-                amount
-                currencyCode
-              }
-            }
-            customer {
-              email
-            }
-            billingAddress {
-              firstName
-              lastName
-              company
-              address1
-              city
-              province
-              country
-              phone
-            }
-            shippingAddress {
-              firstName
-              lastName
-              company
-              address1
-              city
-              province
-              country
-              phone
-            }
-          }
-        }`,
-        variables: {id: orderId},
-      };
-
-      const res = await fetch("shopify:admin/api/graphql.json", {
-        method: "POST",
-        body: JSON.stringify(basicOrderQuery),
-      });
-
-      if (res.ok) {
-        const orderData = await res.json();
-        if (orderData.data && orderData.data.order) {
-          const order = orderData.data.order;
-          setOrderInfo(prev => ({
-            ...prev,
-            name: order.name || prev.name,
-            createdAt: order.createdAt,
-            displayFinancialStatus: order.displayFinancialStatus
-          }));
-        }
-      }
-      
-      setLoading(false);
-    } catch (error) {
-      setError('Limited access - showing basic info only');
-      setLoading(false);
-    }
-  };
-
-  // Function to create invoice
-  const createInvoice = async () => {
-    try {
-      setLoading(true);
-      setError('');
-
-      // Get full order data first
-      const orderQuery = {
         query: `query Order($id: ID!) {
           order(id: $id) {
             id
@@ -167,36 +153,7 @@ function App() {
               }
             }
             displayFinancialStatus
-            financialStatus
-            currency
             taxesIncluded
-            lineItems(first: 50) {
-              edges {
-                node {
-                  id
-                  title
-                  quantity
-                  price
-                  sku
-                  taxLines {
-                    rate
-                    title
-                  }
-                  discountAllocations {
-                    amount
-                  }
-                }
-              }
-            }
-            shippingLines(first: 5) {
-              edges {
-                node {
-                  title
-                  price
-                  discountedPrice
-                }
-              }
-            }
             billingAddress {
               firstName
               lastName
@@ -225,135 +182,307 @@ function App() {
               id
               email
             }
+            lineItems(first: 50) {
+              edges {
+                node {
+                  id
+                  title
+                  quantity
+                  originalUnitPriceSet {
+                    shopMoney {
+                      amount
+                      currencyCode
+                    }
+                  }
+                  sku
+                  taxLines {
+                    rate
+                    title
+                  }
+                  discountAllocations {
+                    allocatedAmountSet {
+                      shopMoney {
+                        amount
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            shippingLines(first: 5) {
+              edges {
+                node {
+                  title
+                  originalPriceSet {
+                    shopMoney {
+                      amount
+                      currencyCode
+                    }
+                  }
+                  discountedPriceSet {
+                    shopMoney {
+                      amount
+                      currencyCode
+                    }
+                  }
+                }
+              }
+            }
           }
         }`,
-        variables: {id: orderInfo.id},
+        variables: { id: orderId }
       };
 
-      const orderRes = await fetch("shopify:admin/api/graphql.json", {
+      console.log('Fetching order data for:', orderId);
+      
+      const res = await fetch("shopify:admin/api/graphql.json", {
         method: "POST",
-        body: JSON.stringify(orderQuery),
+        body: JSON.stringify(basicOrderQuery),
       });
 
-      if (!orderRes.ok) {
-        throw new Error('Failed to fetch order data');
+      console.log('GraphQL Response status:', res.status);
+
+      if (!res.ok) {
+        console.error('GraphQL request failed:', res.status, res.statusText);
+        throw new Error(`Failed to fetch order data: ${res.status} ${res.statusText}`);
       }
 
-      const orderData = await orderRes.json();
-      if (!orderData.data || !orderData.data.order) {
-        throw new Error('Order data not available');
+      const result = await res.json();
+      console.log('GraphQL Response:', result);
+
+      if (result.errors) {
+        console.warn('GraphQL warnings (non-critical):', result.errors);
+        // Check if it's just permissions errors but we still have data
+        if (!result.data || !result.data.order) {
+          throw new Error(`GraphQL errors: ${result.errors.map((e: any) => e.message).join(', ')}`);
+        }
+        // If we have data despite errors, it's likely just permission warnings - continue
+        console.log('Order data available despite warnings, continuing...');
       }
 
-      // Transform GraphQL data to REST-like format for backend
-      const order = orderData.data.order;
-      const transformedOrder = {
-        id: orderInfo.orderNumber,
-        name: order.name,
-        order_number: orderInfo.orderNumber,
-        email: order.email,
-        phone: order.phone,
-        currency: order.currency,
-        taxes_included: order.taxesIncluded,
-        financial_status: order.financialStatus,
-        total_price: order.totalPriceSet?.shopMoney?.amount || '0',
-        line_items: order.lineItems.edges.map(edge => ({
-          id: edge.node.id,
-          title: edge.node.title,
-          quantity: edge.node.quantity,
-          price: edge.node.price,
-          sku: edge.node.sku,
-          tax_lines: edge.node.taxLines || [],
-          discount_allocations: edge.node.discountAllocations || []
-        })),
-        shipping_lines: order.shippingLines.edges.map(edge => ({
-          title: edge.node.title,
-          price: edge.node.price,
-          discounted_price: edge.node.discountedPrice
-        })),
-        billing_address: order.billingAddress,
-        shipping_address: order.shippingAddress,
-        customer: order.customer
-      };
+      if (!result.data || !result.data.order) {
+        console.error('No order data in response:', result);
+        throw new Error('Order data not available - the order may not exist or you may not have permission to access it');
+      }
 
-      // Create invoice payload
-      const invoicePayload = {
+      const order = result.data.order;
+      console.log('Order data received:', order);
+
+      // Extract the actual order number from the order name (e.g., "Nr.4596" -> "4596")
+      const actualOrderNumber = order.name ? order.name.replace(/^Nr\./, '') : orderInfo.orderNumber;
+      
+      // Update order info with correct order number
+      setOrderInfo(prev => ({
+        ...prev,
+        orderNumber: actualOrderNumber,
+        name: order.name || prev.name
+      }));
+
+      setOrderData(order);
+
+      // Re-check invoice status with the correct order number
+      await checkInvoiceStatus(actualOrderNumber);
+
+      // Build initial client data
+      const transformedOrder = transformGraphQLOrderToRest(order, actualOrderNumber);
+      const initialClient = buildClientFromOrder(transformedOrder);
+      console.log('Built client data:', initialClient);
+      setCustomClient(initialClient);
+
+      // Check if this is a B2B order and show company lookup
+      const isB2B = !!(order.billingAddress?.company || extractCifFromCompany(order.billingAddress?.company));
+      console.log('B2B order detection:', {
+        isB2B,
+        hasCompany: !!order.billingAddress?.company,
+        company: order.billingAddress?.company,
+        extractedCif: extractCifFromCompany(order.billingAddress?.company)
+      });
+      setShowCompanyLookup(isB2B);
+
+    } catch (error) {
+      console.error('Error fetching order data:', error);
+      throw error;
+    }
+  };
+
+  // Create invoice
+  const createInvoice = async () => {
+    if (!orderData || !customClient) {
+      setError('Order data not available');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+
+    try {
+      const transformedOrder = transformGraphQLOrderToRest(orderData, orderInfo.orderNumber);
+      
+      const payload = {
         orderId: orderInfo.orderNumber,
         orderData: transformedOrder,
-        invoiceOptions: {
-          sendEmail: true,
-          useStock: true,
-          language: 'RO'
-        },
-        validateCompany: false, // For now, keep it simple
-        skipAnaf: false
+        invoiceOptions,
+        customClient,
+        validateCompany: showCompanyLookup && !!companyValidation?.success,
+        skipAnaf: !showCompanyLookup || !companyValidation
       };
 
-      // Backend URL
-      const backendUrl = 'https://primesupplements-oblio-production.up.railway.app';
+      const response = await createInvoiceRequest(payload);
+      
+      if (response.success && response.data) {
+        setInvoiceResult(response.data);
+        setCurrentStep('result');
         
-      const response = await fetch(`${backendUrl}/invoice/create`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Shopify-Admin-Extension',
-          'X-Shopify-Extension': 'invoice-generator'
-        },
-        body: JSON.stringify(invoicePayload)
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        setInvoiceResult(result);
         // Update invoice status
         setInvoiceStatus({
           hasInvoice: true,
-          invoiceNumber: result.invoice.number,
-          invoiceUrl: result.invoice.url,
+          hasError: false,
+          invoiceNumber: response.data.invoice?.number,
+          invoiceUrl: response.data.invoice?.url,
           status: 'invoiced'
         });
       } else {
-        throw new Error(result.error || 'Failed to create invoice');
+        setInvoiceResult(response as InvoiceResult);
+        setCurrentStep('result');
       }
       
     } catch (error) {
-      console.error('Invoice creation error:', error);
-      setError(`Failed to create invoice: ${error.message}`);
+      setError(handleApiError(error));
     } finally {
       setLoading(false);
     }
   };
 
-  // Function to retry invoice creation
+  // Retry invoice creation
   const retryInvoice = async () => {
-    try {
-      setLoading(true);
-      setError('');
+    if (!orderData) {
+      setError('Order data not available');
+      return;
+    }
 
-      // Similar to createInvoice but use retry endpoint
-      // For now, redirect to create - in future we can add retry-specific logic
-      await createInvoice();
+    setLoading(true);
+    setError('');
+
+    try {
+      const transformedOrder = transformGraphQLOrderToRest(orderData, orderInfo.orderNumber);
+      
+      const payload = {
+        orderId: orderInfo.orderNumber,
+        orderData: transformedOrder,
+        retryOptions: {}
+      };
+
+      const response = await retryInvoiceRequest(payload);
+      
+      if (response.success && response.data) {
+        setInvoiceResult(response.data);
+        setCurrentStep('result');
+        
+        // Update invoice status
+        setInvoiceStatus({
+          hasInvoice: true,
+          hasError: false,
+          invoiceNumber: response.data.invoice?.number,
+          invoiceUrl: response.data.invoice?.url,
+          status: 'invoiced'
+        });
+      } else {
+        setInvoiceResult(response as InvoiceResult);
+        setCurrentStep('result');
+      }
       
     } catch (error) {
-      console.error('Invoice retry error:', error);
-      setError(`Failed to retry invoice: ${error.message}`);
+      setError(handleApiError(error));
+    } finally {
       setLoading(false);
     }
   };
 
-  // Determine what action to show
-  const getActionButton = () => {
-    if (invoiceResult) {
+  // Event handlers
+  const handleCompanyValidation = (result: CompanyValidationResult | null) => {
+    setCompanyValidation(result);
+  };
+
+  const handleClientDataChange = (client: CustomClient) => {
+    setCustomClient(client);
+  };
+
+  const handleInvoiceOptionsChange = (options: InvoiceOptions) => {
+    setInvoiceOptions(options);
+  };
+
+  const handleViewInvoice = (url: string) => {
+    if (url) {
+      // Try to open the URL, fallback to copying to clipboard if window.open fails
+      try {
+        // Create a temporary link element and click it
+        const link = document.createElement('a');
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } catch (error) {
+        // Fallback: copy URL to clipboard
+        navigator.clipboard.writeText(url).then(() => {
+          alert('Invoice URL copied to clipboard: ' + url);
+        }).catch(() => {
+          // Last resort: show the URL
+          alert('Please open this URL manually: ' + url);
+        });
+      }
+    }
+  };
+
+  const handleStartInvoiceCreation = () => {
+    console.log('Starting invoice creation...', {
+      orderData: !!orderData,
+      customClient: !!customClient,
+      currentStep
+    });
+    setCurrentStep('form');
+  };
+
+  const handleBackToStatus = () => {
+    setCurrentStep('status');
+    setInvoiceResult(null);
+    setError('');
+  };
+
+  // Determine primary action based on current step and state
+  const getPrimaryAction = () => {
+    if (currentStep === 'result') {
+      if (invoiceResult?.success) {
+        return (
+          <Button onPress={() => close()} variant="primary">
+            Done
+          </Button>
+        );
+      } else {
+        return (
+          <Button onPress={handleBackToStatus} variant="secondary">
+            Back
+          </Button>
+        );
+      }
+    }
+
+    if (currentStep === 'form') {
       return (
-        <Button onPress={() => close()} variant="primary">
-          Done
+        <Button onPress={createInvoice} disabled={loading || !customClient} variant="primary">
+          {loading ? 'Creating Invoice...' : 'Create Invoice'}
         </Button>
       );
     }
 
+    // Status step
     if (invoiceStatus?.hasInvoice) {
       return (
-        <Button onPress={() => window.open(invoiceStatus.invoiceUrl, '_blank')} variant="secondary">
+        <Button 
+          onPress={() => handleViewInvoice(invoiceStatus.invoiceUrl!)} 
+          variant="secondary"
+        >
           View Invoice
         </Button>
       );
@@ -368,88 +497,122 @@ function App() {
     }
 
     return (
-      <Button onPress={createInvoice} disabled={loading} variant="primary">
-        {loading ? 'Creating...' : 'Generate Invoice'}
+      <Button onPress={handleStartInvoiceCreation} disabled={loading || !orderData} variant="primary">
+        Generate Invoice
+      </Button>
+    );
+  };
+
+  // Determine secondary action
+  const getSecondaryAction = () => {
+    if (currentStep === 'form') {
+      return (  
+        <Button onPress={handleBackToStatus} variant="secondary">
+          Back
+        </Button>
+      );
+    }
+
+    return (
+      <Button onPress={() => close()} variant="secondary">
+        Cancel
       </Button>
     );
   };
 
   return (
     <AdminAction
-      primaryAction={getActionButton()}
-      secondaryAction={
-        <Button onPress={() => close()} variant="secondary">
-          Cancel
-        </Button>
-      }
+      primaryAction={getPrimaryAction()}
+      secondaryAction={getSecondaryAction()}
     >
-      <BlockStack gap="small">
+      <BlockStack gap="base">
         {/* Loading State */}
         {loading && (
           <Banner>
-            <Text>Processing invoice...</Text>
+            <Text>
+              {currentStep === 'status' ? 'Loading order information...' : 
+               currentStep === 'form' ? 'Creating invoice...' : 'Processing...'}
+            </Text>
           </Banner>
         )}
-        
-        {/* Error State */}
-        {error && !invoiceResult && (
+
+        {/* Global Error State */}
+        {error && currentStep !== 'result' && (
           <Banner tone="critical">
             <Text>{error}</Text>
           </Banner>
         )}
 
-        {/* Success State */}
-        {invoiceResult && (
-          <Banner tone="success">
-            <BlockStack gap="small">
-              <Text fontWeight="bold">Invoice created successfully!</Text>
-              <Text>Invoice Number: <Text fontWeight="bold">{invoiceResult.invoice.number}</Text></Text>
-              {invoiceResult.invoice.url && (
-                <Button 
-                  onPress={() => window.open(invoiceResult.invoice.url, '_blank')} 
-                  variant="secondary"
-                  size="small"
-                >
-                  View Invoice
-                </Button>
-              )}
-            </BlockStack>
-          </Banner>
+        {/* Order Information Header */}
+        {orderInfo.name && (
+          <Text fontWeight="bold">Order: {orderInfo.name}</Text>
         )}
 
-        {/* Current Status */}
-        {!invoiceResult && (
-          <Section>
-            <BlockStack gap="small">
-              <Text fontWeight="bold">Order Information</Text>
-              <InlineStack gap="base">
-                <Text>Order: {orderInfo.name}</Text>
-                {orderInfo.displayFinancialStatus && (
-                  <Text>Status: {orderInfo.displayFinancialStatus}</Text>
+        {/* Step-based Content */}
+        {currentStep === 'status' && (
+          <InvoiceStatus 
+            status={invoiceStatus}
+            loading={loading && !orderData}
+            onRetry={retryInvoice}
+            onViewInvoice={handleViewInvoice}
+            onRefreshStatus={() => checkInvoiceStatus(orderInfo.orderNumber)}
+          />
+        )}
+
+        {currentStep === 'form' && (
+          <BlockStack gap="base">
+            {/* Check if we have required data */}
+            {!orderData && (
+              <Banner tone="critical">
+                <Text>Order data is not available. Please refresh and try again.</Text>
+              </Banner>
+            )}
+            
+            {!customClient && orderData && (
+              <Banner tone="critical">
+                <Text>Customer data is not available. Please refresh and try again.</Text>
+              </Banner>
+            )}
+
+            {orderData && customClient && (
+              <>
+                {/* Company Lookup for B2B */}
+                {showCompanyLookup && (
+                  <>
+                    <CompanyLookup
+                      initialCif={extractCifFromCompany(orderData.billingAddress?.company)}
+                      onValidationResult={handleCompanyValidation}
+                      onClientDataChange={handleClientDataChange}
+                      disabled={loading}
+                    />
+                    <Divider />
+                  </>
                 )}
-              </InlineStack>
-              
-              {/* Invoice Status */}
-              {invoiceStatus && (
-                <BlockStack gap="small">
-                  <Text fontWeight="bold">Invoice Status</Text>
-                  {invoiceStatus.hasInvoice ? (
-                    <Banner tone="success">
-                      <Text>Invoice #{invoiceStatus.invoiceNumber} already exists</Text>
-                    </Banner>
-                  ) : invoiceStatus.hasError ? (
-                    <Banner tone="warning">
-                      <Text>Previous invoice creation failed - you can retry</Text>
-                    </Banner>
-                  ) : (
-                    <Banner>
-                      <Text>No invoice found for this order</Text>
-                    </Banner>
-                  )}
-                </BlockStack>
-              )}
-            </BlockStack>
-          </Section>
+
+                {/* Invoice Form */}
+                <InvoiceForm
+                  order={orderData}
+                  onOptionsChange={handleInvoiceOptionsChange}
+                  onClientChange={handleClientDataChange}
+                  disabled={loading}
+                  validatedClient={companyValidation?.success ? customClient : null}
+                />
+              </>
+            )}
+          </BlockStack>
+        )}
+
+        {currentStep === 'result' && (
+          <InvoiceResultDisplay
+            result={invoiceResult}
+            onViewInvoice={handleViewInvoice}
+            onRetry={() => {
+              setCurrentStep('form');
+              setInvoiceResult(null);
+            }}
+            onClose={() => close()}
+            showRetryButton={!invoiceResult?.success}
+          />
         )}
       </BlockStack>
     </AdminAction>

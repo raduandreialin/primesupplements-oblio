@@ -1,5 +1,5 @@
 import OblioService from '../services/OblioService.js';
-import { transformOrderWithAnafEnrichment, logger } from '../utils/index.js';
+import { transformOrderWithAnafEnrichment, logger, formatRomanianAddress, getCompanyNameFromOrder } from '../utils/index.js';
 import config from '../config/AppConfig.js';
 
 /**
@@ -259,8 +259,6 @@ export class CreateInvoiceAction {
      * @private
      */
     _buildClientFromOrder(order) {
-        const { formatRomanianAddress, getCompanyNameFromOrder } = require('../utils/index.js');
-        
         // Build address
         const billingAddr = order.billing_address ? formatRomanianAddress(order.billing_address) : null;
         const shippingAddr = !billingAddr && order.shipping_address ? formatRomanianAddress(order.shipping_address) : null;
