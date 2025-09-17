@@ -167,8 +167,6 @@ function App() {
               }
             }
             displayFinancialStatus
-            financialStatus
-            currency
             taxesIncluded
             billingAddress {
               firstName

@@ -171,7 +171,7 @@ export function isB2BOrder(order: any): boolean {
  */
 export function getDefaultInvoiceOptions(order: any): InvoiceOptions {
   const isB2B = isB2BOrder(order);
-  const isPaid = (order.financial_status || '').toLowerCase() === 'paid';
+  const isPaid = (order.displayFinancialStatus || order.financial_status || '').toLowerCase() === 'paid';
   
   return {
     seriesName: 'PRS',
@@ -268,8 +268,6 @@ export function getOrderGraphQLQuery(): string {
         }
       }
       displayFinancialStatus
-      financialStatus
-      currency
       taxesIncluded
       note
       lineItems(first: 50) {

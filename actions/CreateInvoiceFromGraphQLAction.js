@@ -226,16 +226,12 @@ export class CreateInvoiceFromGraphQLAction {
             if (shippingPrice > 0) {
                 shippingProducts.push({
                     name: shippingLine.title || 'Transport',
-                    code: 'TRANSPORT',
                     price: shippingPrice,
                     quantity: 1,
                     measuringUnit: 'buc',
                     currency: graphqlOrder.totalPriceSet?.shopMoney?.currencyCode || 'RON',
                     productType: 'Serviciu',
-                    management: config.oblio.OBLIO_MANAGEMENT,
-                    vatName: 'Normala',
-                    vatPercentage: 19,
-                    vatIncluded: graphqlOrder.taxesIncluded ? 1 : 0
+                    management: config.oblio.OBLIO_MANAGEMENT
                 });
             }
         });
@@ -286,16 +282,23 @@ export class CreateInvoiceFromGraphQLAction {
      * @private
      */
     _extractVatInfoFromGraphQL(item) {
-        if (item.taxLines && item.taxLines.length > 0) {
-            const taxLine = item.taxLines[0];
-            const rate = parseFloat(taxLine.rate || 0) * 100; // Convert to percentage
-            
-            if (rate >= 19) return { name: 'Normala', percentage: 19 };
-            if (rate >= 9) return { name: 'Redusa', percentage: 9 };
-            if (rate >= 5) return { name: 'Redusa', percentage: 5 };
-        }
+        let vatPercentage = 21; // Default Romanian standard rate (matches original)
+        let vatName = 'Normala';
         
-        return { name: 'Normala', percentage: 19 }; // Default VAT
+        if (item.taxLines && item.taxLines.length > 0) {
+            const taxRate = item.taxLines[0].rate;
+            vatPercentage = Math.round(taxRate * 100);
+            
+            if (vatPercentage === 21) {
+                vatName = 'Normala';
+            } else if (vatPercentage === 11) {
+                vatName = 'Redusa';
+            } else if (vatPercentage === 0) {
+                vatName = 'SFDD';
+            }
+        }
+
+        return { percentage: vatPercentage, name: vatName };
     }
 
     /**
@@ -318,8 +321,7 @@ export class CreateInvoiceFromGraphQLAction {
      * @private
      */
     _isOrderPaid(graphqlOrder) {
-        return graphqlOrder.displayFinancialStatus?.toLowerCase() === 'paid' ||
-               graphqlOrder.financialStatus?.toLowerCase() === 'paid';
+        return graphqlOrder.displayFinancialStatus?.toLowerCase() === 'paid';
     }
 
     /**
