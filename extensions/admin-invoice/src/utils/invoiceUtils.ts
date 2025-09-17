@@ -58,41 +58,6 @@ export interface InvoiceResult {
   retryable?: boolean;
 }
 
-/**
- * Transform GraphQL order data to REST format for backend
- */
-export function transformGraphQLOrderToRest(graphqlOrder: any, orderNumber: string): any {
-  return {
-    id: orderNumber,
-    name: graphqlOrder.name,
-    order_number: orderNumber,
-    email: graphqlOrder.email,
-    phone: graphqlOrder.phone,
-    currency: graphqlOrder.currency,
-    taxes_included: graphqlOrder.taxesIncluded,
-    financial_status: graphqlOrder.financialStatus,
-    total_price: graphqlOrder.totalPriceSet?.shopMoney?.amount || '0',
-    line_items: graphqlOrder.lineItems.edges.map((edge: any) => ({
-      id: edge.node.id,
-      title: edge.node.title,
-      quantity: edge.node.quantity,
-      price: edge.node.originalUnitPriceSet?.shopMoney?.amount || '0',
-      sku: edge.node.sku,
-      tax_lines: edge.node.taxLines || [],
-      discount_allocations: edge.node.discountAllocations?.map((allocation: any) => ({
-        amount: allocation.allocatedAmountSet?.shopMoney?.amount || '0'
-      })) || []
-    })),
-    shipping_lines: graphqlOrder.shippingLines.edges.map((edge: any) => ({
-      title: edge.node.title,
-      price: edge.node.originalPriceSet?.shopMoney?.amount || '0',
-      discounted_price: edge.node.discountedPriceSet?.shopMoney?.amount || edge.node.originalPriceSet?.shopMoney?.amount || '0'
-    })),
-    billing_address: graphqlOrder.billingAddress,
-    shipping_address: graphqlOrder.shippingAddress,
-    customer: graphqlOrder.customer
-  };
-}
 
 /**
  * Build client data from order billing/shipping address

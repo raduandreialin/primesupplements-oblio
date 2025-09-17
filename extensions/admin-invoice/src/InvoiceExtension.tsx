@@ -22,7 +22,6 @@ import {
   type CustomClient,
   type InvoiceStatus as IInvoiceStatus,
   type InvoiceResult,
-  transformGraphQLOrderToRest,
   buildClientFromOrder,
   isB2BOrder,
   getOrderGraphQLQuery,
@@ -35,6 +34,7 @@ import {
 
 import {
   createInvoiceRequest,
+  createInvoiceFromExtensionRequest,
   retryInvoiceRequest,
   getInvoiceStatusRequest,
   handleApiError
@@ -299,9 +299,8 @@ function App() {
       // Re-check invoice status with the full order ID
       await checkInvoiceStatus(orderId);
 
-      // Build initial client data
-      const transformedOrder = transformGraphQLOrderToRest(order, actualOrderNumber);
-      const initialClient = buildClientFromOrder(transformedOrder);
+      // Build initial client data from GraphQL order
+      const initialClient = buildClientFromOrder(order);
       console.log('Built client data:', initialClient);
       setCustomClient(initialClient);
 
@@ -332,18 +331,16 @@ function App() {
     setError('');
 
     try {
-      const transformedOrder = transformGraphQLOrderToRest(orderData, orderInfo.orderNumber);
-      
+      // Use extension-native endpoint - no transformation needed!
       const payload = {
-        orderId: orderInfo.id, // Use full Shopify order ID for backend operations
-        orderData: transformedOrder,
+        orderId: orderInfo.id, // Full Shopify order ID
+        orderNumber: orderInfo.orderNumber, // Order number for display/reference
+        graphqlOrder: orderData, // Raw GraphQL data
         invoiceOptions,
-        customClient,
-        validateCompany: showCompanyLookup && !!companyValidation?.success,
-        skipAnaf: !showCompanyLookup || !companyValidation
+        customClient
       };
 
-      const response = await createInvoiceRequest(payload);
+      const response = await createInvoiceFromExtensionRequest(payload);
       
       if (response.success && response.data) {
         setInvoiceResult(response.data);
@@ -380,15 +377,20 @@ function App() {
     setError('');
 
     try {
-      const transformedOrder = transformGraphQLOrderToRest(orderData, orderInfo.orderNumber);
-      
+      // For retry, we can use the same extension endpoint with retry options
       const payload = {
-        orderId: orderInfo.id, // Use full Shopify order ID for backend operations
-        orderData: transformedOrder,
-        retryOptions: {}
+        orderId: orderInfo.id, // Full Shopify order ID
+        orderNumber: orderInfo.orderNumber, // Order number for display/reference
+        graphqlOrder: orderData, // Raw GraphQL data
+        invoiceOptions: {
+          ...invoiceOptions,
+          // Add retry-specific options if needed
+          isRetry: true
+        },
+        customClient
       };
 
-      const response = await retryInvoiceRequest(payload);
+      const response = await createInvoiceFromExtensionRequest(payload);
       
       if (response.success && response.data) {
         setInvoiceResult(response.data);

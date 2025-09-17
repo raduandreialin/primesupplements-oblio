@@ -1,5 +1,6 @@
 import express from 'express';
 import InvoiceController from '../controllers/InvoiceController.js';
+import { CreateInvoiceFromGraphQLAction } from '../actions/CreateInvoiceFromGraphQLAction.js';
 import { logger } from '../utils/index.js';
 
 const router = express.Router();
@@ -55,7 +56,7 @@ router.post('/webhook/retry', async (req, res) => {
 
 /**
  * POST /invoice/create
- * Create invoice from admin extension
+ * Create invoice from admin extension (legacy REST format)
  * 
  * Expected payload:
  * {
@@ -77,6 +78,95 @@ router.post('/create', async (req, res) => {
             route: '/invoice/create',
             orderId: req.body?.orderId
         }, 'Invoice extension creation route error');
+        
+        res.status(500).json({
+            success: false,
+            error: 'Internal server error',
+            details: error.message
+        });
+    }
+});
+
+/**
+ * POST /invoice/create-from-extension
+ * Create invoice from admin extension (native GraphQL format)
+ * 
+ * Expected payload:
+ * {
+ *   orderId: string,
+ *   orderNumber: string,
+ *   graphqlOrder: object,
+ *   invoiceOptions?: object,
+ *   customClient?: object
+ * }
+ */
+router.post('/create-from-extension', async (req, res) => {
+    try {
+        const { orderId, orderNumber, graphqlOrder, invoiceOptions = {}, customClient = null } = req.body;
+
+        // Validate required fields
+        if (!orderId || !orderNumber || !graphqlOrder) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required fields: orderId, orderNumber, and graphqlOrder are required'
+            });
+        }
+
+        if (!graphqlOrder.lineItems?.edges || graphqlOrder.lineItems.edges.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'Order must have line items'
+            });
+        }
+
+        logger.info({ 
+            orderId, 
+            orderNumber,
+            orderName: graphqlOrder.name,
+            lineItemCount: graphqlOrder.lineItems.edges.length
+        }, 'Processing extension invoice creation request');
+
+        // Create invoice using GraphQL-native action
+        const createAction = new CreateInvoiceFromGraphQLAction();
+        const result = await createAction.execute({
+            graphqlOrder,
+            orderNumber,
+            invoiceOptions,
+            customClient
+        });
+
+        if (result.success) {
+            logger.info({
+                orderId,
+                orderNumber,
+                invoiceNumber: result.invoice.number
+            }, 'Extension invoice created successfully');
+
+            return res.json({
+                success: true,
+                data: result
+            });
+        } else {
+            logger.error({
+                orderId,
+                orderNumber,
+                error: result.error
+            }, 'Extension invoice creation failed');
+
+            return res.status(400).json({
+                success: false,
+                error: result.error,
+                retryable: result.retryable
+            });
+        }
+
+    } catch (error) {
+        logger.error({
+            error: error.message,
+            stack: error.stack,
+            route: '/invoice/create-from-extension',
+            orderId: req.body?.orderId
+        }, 'Extension invoice creation route error');
         
         res.status(500).json({
             success: false,

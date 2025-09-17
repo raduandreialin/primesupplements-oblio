@@ -195,7 +195,7 @@ export function handleApiError(error: any): string {
 }
 
 /**
- * Create invoice API request
+ * Create invoice API request (legacy REST format)
  */
 export async function createInvoiceRequest(payload: {
   orderId: string;
@@ -206,6 +206,23 @@ export async function createInvoiceRequest(payload: {
   skipAnaf?: boolean;
 }): Promise<ApiResponse> {
   return makeApiRequest('/invoice/create', {
+    method: 'POST',
+    body: payload,
+    timeout: 45000 // Longer timeout for invoice creation
+  });
+}
+
+/**
+ * Create invoice API request (from extension)
+ */
+export async function createInvoiceFromExtensionRequest(payload: {
+  orderId: string;
+  orderNumber: string;
+  graphqlOrder: any;
+  invoiceOptions?: any;
+  customClient?: any;
+}): Promise<ApiResponse> {
+  return makeApiRequest('/invoice/create-from-extension', {
     method: 'POST',
     body: payload,
     timeout: 45000 // Longer timeout for invoice creation
