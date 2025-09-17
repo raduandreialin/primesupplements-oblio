@@ -1,6 +1,7 @@
 import express from 'express';
 import InvoiceController from '../controllers/InvoiceController.js';
 import { CreateInvoiceFromExtensionAction } from '../actions/CreateInvoiceFromExtension.js';
+import { UpdateOrderInvoiceAction } from '../actions/UpdateOrderInvoiceAction.js';
 import { logger } from '../utils/index.js';
 
 const router = express.Router();
@@ -141,6 +142,31 @@ router.post('/create-from-extension', async (req, res) => {
                 orderNumber,
                 invoiceNumber: result.invoice.number
             }, 'Extension invoice created successfully');
+
+            // Update order with invoice information (metafields, tags, etc.)
+            try {
+                const updateOrderAction = new UpdateOrderInvoiceAction();
+                await updateOrderAction.execute({
+                    orderId,
+                    invoiceResult: result,
+                    removeErrorTags: true
+                });
+                
+                logger.info({
+                    orderId,
+                    orderNumber,
+                    invoiceNumber: result.invoice.number
+                }, 'Order updated with invoice information');
+                
+            } catch (updateError) {
+                logger.warn({
+                    orderId,
+                    orderNumber,
+                    invoiceNumber: result.invoice.number,
+                    updateError: updateError.message
+                }, 'Invoice created but order update failed');
+                // Don't fail the whole operation if order update fails
+            }
 
             return res.json({
                 success: true,
