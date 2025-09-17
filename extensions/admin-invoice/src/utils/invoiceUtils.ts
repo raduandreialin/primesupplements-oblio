@@ -76,15 +76,17 @@ export function transformGraphQLOrderToRest(graphqlOrder: any, orderNumber: stri
       id: edge.node.id,
       title: edge.node.title,
       quantity: edge.node.quantity,
-      price: edge.node.price,
+      price: edge.node.originalUnitPriceSet?.shopMoney?.amount || '0',
       sku: edge.node.sku,
       tax_lines: edge.node.taxLines || [],
-      discount_allocations: edge.node.discountAllocations || []
+      discount_allocations: edge.node.discountAllocations?.map((allocation: any) => ({
+        amount: allocation.allocatedAmountSet?.shopMoney?.amount || '0'
+      })) || []
     })),
     shipping_lines: graphqlOrder.shippingLines.edges.map((edge: any) => ({
       title: edge.node.title,
-      price: edge.node.price,
-      discounted_price: edge.node.discountedPrice
+      price: edge.node.originalPriceSet?.shopMoney?.amount || '0',
+      discounted_price: edge.node.discountedPriceSet?.shopMoney?.amount || edge.node.originalPriceSet?.shopMoney?.amount || '0'
     })),
     billing_address: graphqlOrder.billingAddress,
     shipping_address: graphqlOrder.shippingAddress,
@@ -207,7 +209,7 @@ export function getDefaultInvoiceOptions(order: any): InvoiceOptions {
   const isPaid = (order.financial_status || '').toLowerCase() === 'paid';
   
   return {
-    seriesName: isB2B ? 'FACT' : 'FCT',
+    seriesName: 'PRS',
     language: 'RO',
     sendEmail: true,
     useStock: true,

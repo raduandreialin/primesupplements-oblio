@@ -100,11 +100,9 @@ function AdminPrintApp() {
       <BlockStack blockGap="base">
         <Banner tone="info" title="Print Shipping Label">
           Ready to print AWB shipping label
+          <Text>Courier Company: Cargus</Text>
+          <Text>AWB Number: {awbNumber}</Text>
         </Banner>
-        
-        <Text fontWeight="bold">Shipping Label (AWB)</Text>
-        <Text>Courier Company: Cargus</Text>
-        <Text>AWB Number: {awbNumber}</Text>
       </BlockStack>
     </AdminPrintAction>
   );

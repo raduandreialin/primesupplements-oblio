@@ -88,6 +88,19 @@ function App() {
     }
   }, [data.selected]);
 
+  // Determine initial step based on invoice status and order data
+  useEffect(() => {
+    if (invoiceStatus && orderData && !loading) {
+      if (!invoiceStatus.hasInvoice && !invoiceStatus.hasError) {
+        // If order is not invoiced and has no errors, show form directly
+        setCurrentStep('form');
+      } else {
+        // Otherwise show status (for existing invoices or errors)
+        setCurrentStep('status');
+      }
+    }
+  }, [invoiceStatus, orderData, loading]);
+
   // Initialize the invoice flow
   const initializeInvoiceFlow = async (orderId: string, orderNumber: string) => {
     setLoading(true);
@@ -111,7 +124,8 @@ function App() {
   const checkInvoiceStatus = async (orderId: string) => {
     try {
       console.log('Checking invoice status for order:', orderId);
-      const response = await getInvoiceStatusRequest(orderId);
+      // Use the full Shopify order ID for status check
+      const response = await getInvoiceStatusRequest(orderInfo.id);
       console.log('Invoice status response:', response);
       
       if (response.success && response.data?.status) {
@@ -153,6 +167,8 @@ function App() {
               }
             }
             displayFinancialStatus
+            financialStatus
+            currency
             taxesIncluded
             billingAddress {
               firstName
@@ -280,8 +296,8 @@ function App() {
 
       setOrderData(order);
 
-      // Re-check invoice status with the correct order number
-      await checkInvoiceStatus(actualOrderNumber);
+      // Re-check invoice status with the full order ID
+      await checkInvoiceStatus(orderId);
 
       // Build initial client data
       const transformedOrder = transformGraphQLOrderToRest(order, actualOrderNumber);
@@ -319,7 +335,7 @@ function App() {
       const transformedOrder = transformGraphQLOrderToRest(orderData, orderInfo.orderNumber);
       
       const payload = {
-        orderId: orderInfo.orderNumber,
+        orderId: orderInfo.id, // Use full Shopify order ID for backend operations
         orderData: transformedOrder,
         invoiceOptions,
         customClient,
@@ -367,7 +383,7 @@ function App() {
       const transformedOrder = transformGraphQLOrderToRest(orderData, orderInfo.orderNumber);
       
       const payload = {
-        orderId: orderInfo.orderNumber,
+        orderId: orderInfo.id, // Use full Shopify order ID for backend operations
         orderData: transformedOrder,
         retryOptions: {}
       };
@@ -555,7 +571,7 @@ function App() {
             loading={loading && !orderData}
             onRetry={retryInvoice}
             onViewInvoice={handleViewInvoice}
-            onRefreshStatus={() => checkInvoiceStatus(orderInfo.orderNumber)}
+            onRefreshStatus={() => checkInvoiceStatus(orderInfo.id)}
           />
         )}
 

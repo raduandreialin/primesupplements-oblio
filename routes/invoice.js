@@ -251,9 +251,9 @@ router.get('/health', (req, res) => {
 router.get('/config', (req, res) => {
     try {
         const config = {
-            defaultSeries: process.env.OBLIO_INVOICE_SERIES || 'FCT',
+            defaultSeries: process.env.OBLIO_INVOICE_SERIES || 'PRS',
             companyCif: process.env.OBLIO_COMPANY_CIF,
-            availableSeries: ['FCT', 'FACT', 'PRO'], // This could be dynamic
+            availableSeries: ['PRS', 'FCT', 'FACT', 'PRO'], // This could be dynamic
             defaultLanguage: 'RO',
             supportedLanguages: ['RO', 'EN'],
             vatRates: [

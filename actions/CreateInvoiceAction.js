@@ -150,7 +150,7 @@ export class CreateInvoiceAction {
         const invoiceData = {
             cif: companyCif,
             client,
-            seriesName: invoiceOptions.seriesName || process.env.OBLIO_INVOICE_SERIES || 'FCT',
+            seriesName: invoiceOptions.seriesName || process.env.OBLIO_INVOICE_SERIES || 'PRS',
             issueDate: invoiceOptions.issueDate || new Date().toISOString().split('T')[0],
             language: invoiceOptions.language || 'RO',
             mentions: invoiceOptions.mentions || `Factura emisa pentru comanda ${order.name || order.order_number}`,

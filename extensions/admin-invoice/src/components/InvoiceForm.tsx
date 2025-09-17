@@ -8,7 +8,8 @@ import {
   Button,
   Text,
   Section,
-  Divider
+  Divider,
+  DateField
 } from '@shopify/ui-extensions-react/admin';
 
 import {
@@ -44,7 +45,6 @@ export function InvoiceForm({
   );
 
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
-  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // Update client when validated client changes
   useEffect(() => {
@@ -75,9 +75,7 @@ export function InvoiceForm({
 
   const isB2B = isB2BOrder(order);
   const seriesOptions = [
-    { value: 'FCT', label: 'FCT - Standard Invoice' },
-    { value: 'FACT', label: 'FACT - Company Invoice' },
-    { value: 'PRO', label: 'PRO - Proforma Invoice' }
+    { value: 'PRS', label: 'PRS - Primary Series' }
   ];
 
   const languageOptions = [
@@ -85,12 +83,6 @@ export function InvoiceForm({
     { value: 'EN', label: 'English' }
   ];
 
-  const paymentMethodOptions = [
-    { value: 'Card', label: 'Card Payment' },
-    { value: 'Transfer', label: 'Bank Transfer' },
-    { value: 'Cash', label: 'Cash Payment' },
-    { value: 'Other', label: 'Other' }
-  ];
 
   return (
     <BlockStack gap="base">
@@ -186,9 +178,8 @@ export function InvoiceForm({
             />
           </InlineStack>
 
-          <TextField
+          <DateField
             label="Issue Date"
-            type="date"
             value={invoiceOptions.issueDate || new Date().toISOString().split('T')[0]}
             onChange={(value) => handleOptionsChange('issueDate', value)}
             disabled={disabled}
@@ -203,7 +194,7 @@ export function InvoiceForm({
           />
 
           {/* Basic Options */}
-          <BlockStack gap="extraTight">
+          <BlockStack gap="small">
             <Checkbox
               checked={invoiceOptions.sendEmail !== false}
               onChange={(checked) => handleOptionsChange('sendEmail', checked)}
@@ -229,68 +220,16 @@ export function InvoiceForm({
             </Checkbox>
           </BlockStack>
 
-          {/* Advanced Options Toggle */}
-          <Button 
-            onPress={() => setShowAdvanced(!showAdvanced)} 
-            variant="plain"
-            size="small"
-          >
-            {showAdvanced ? 'Hide' : 'Show'} advanced options
-          </Button>
-
-          {/* Advanced Options */}
-          {showAdvanced && (
-            <BlockStack gap="small">
-              <Text fontWeight="bold">Advanced Options</Text>
-              
-              {invoiceOptions.markAsPaid && (
-                <InlineStack gap="small">
-                  <Select
-                    label="Payment Method"
-                    options={paymentMethodOptions}
-                    value={invoiceOptions.paymentMethod || 'Card'}
-                    onChange={(value) => handleOptionsChange('paymentMethod', value)}
-                    disabled={disabled}
-                  />
-                  <TextField
-                    label="Collection Date"
-                    type="date"
-                    value={invoiceOptions.collectDate || new Date().toISOString().split('T')[0]}
-                    onChange={(value) => handleOptionsChange('collectDate', value)}
-                    disabled={disabled}
-                  />
-                </InlineStack>
-              )}
-
-              <BlockStack gap="extraTight">
-                <Checkbox
-                  checked={invoiceOptions.excludeShipping === true}
-                  onChange={(checked) => handleOptionsChange('excludeShipping', checked)}
-                  disabled={disabled}
-                >
-                  Exclude shipping costs from invoice
-                </Checkbox>
-                
-                <Checkbox
-                  checked={invoiceOptions.allowInactiveCompanies === true}
-                  onChange={(checked) => handleOptionsChange('allowInactiveCompanies', checked)}
-                  disabled={disabled}
-                >
-                  Allow invoices for inactive companies
-                </Checkbox>
-              </BlockStack>
-            </BlockStack>
-          )}
         </BlockStack>
       </Section>
 
       {/* Validation Errors */}
       {validationErrors.length > 0 && (
         <Section>
-          <BlockStack gap="extraTight">
-            <Text fontWeight="bold" tone="critical">Validation Errors:</Text>
+          <BlockStack gap="small">
+            <Text fontWeight="bold">Validation Errors:</Text>
             {validationErrors.map((error, index) => (
-              <Text key={index} tone="critical">• {error}</Text>
+              <Text key={index}>• {error}</Text>
             ))}
           </BlockStack>
         </Section>
