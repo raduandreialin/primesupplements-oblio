@@ -343,6 +343,7 @@ function App() {
       if (response.success && response.data) {
         setInvoiceResult(response.data);
         setCurrentStep('result');
+        setError(''); // Clear any previous errors
         
         // Update invoice status
         setInvoiceStatus({
@@ -353,8 +354,24 @@ function App() {
           status: 'invoiced'
         });
       } else {
-        setInvoiceResult(response as InvoiceResult);
+        // Handle error response
+        const errorResult = {
+          success: false,
+          error: response.error || 'Invoice creation failed',
+          details: response.details,
+          retryable: response.retryable
+        };
+        
+        setInvoiceResult(errorResult as InvoiceResult);
         setCurrentStep('result');
+        setError(''); // Clear global error since we're showing it in the result component
+        
+        // Update invoice status to reflect error
+        setInvoiceStatus({
+          hasInvoice: false,
+          hasError: true,
+          status: 'error'
+        });
       }
       
     } catch (error) {
@@ -393,6 +410,7 @@ function App() {
       if (response.success && response.data) {
         setInvoiceResult(response.data);
         setCurrentStep('result');
+        setError(''); // Clear any previous errors
         
         // Update invoice status
         setInvoiceStatus({
@@ -403,8 +421,24 @@ function App() {
           status: 'invoiced'
         });
       } else {
-        setInvoiceResult(response as InvoiceResult);
+        // Handle error response
+        const errorResult = {
+          success: false,
+          error: response.error || 'Invoice retry failed',
+          details: response.details,
+          retryable: response.retryable
+        };
+        
+        setInvoiceResult(errorResult as InvoiceResult);
         setCurrentStep('result');
+        setError(''); // Clear global error since we're showing it in the result component
+        
+        // Update invoice status to reflect error
+        setInvoiceStatus({
+          hasInvoice: false,
+          hasError: true,
+          status: 'error'
+        });
       }
       
     } catch (error) {

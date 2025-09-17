@@ -63,29 +63,33 @@ export class CreateInvoiceFromExtensionAction {
                 orderNumber,
                 oblioResponse: {
                     status: oblioResponse.status,
-                    message: oblioResponse.message,
-                    hasData: !!oblioResponse.data
+                    statusMessage: oblioResponse.statusMessage,
+                    hasData: !!oblioResponse.data,
+                    dataKeys: oblioResponse.data ? Object.keys(oblioResponse.data) : []
                 }
             }, 'Oblio API response received');
 
             // Check if the response contains invoice data (successful response)
-            if (oblioResponse && oblioResponse.id && oblioResponse.number) {
+            // Handle both direct format and wrapped data format
+            const responseData = oblioResponse.data || oblioResponse;
+            
+            if (responseData && responseData.id && responseData.number) {
                 logger.info({
                     orderId: graphqlOrder.id,
-                    invoiceNumber: oblioResponse.number,
-                    invoiceUrl: oblioResponse.link
+                    invoiceNumber: responseData.number,
+                    invoiceUrl: responseData.link
                 }, 'Invoice created successfully');
 
                 return {
                     success: true,
                     invoice: {
-                        number: oblioResponse.number,
-                        url: oblioResponse.link,
-                        series: oblioResponse.seriesName,
-                        issueDate: oblioResponse.issueDate || new Date().toISOString().split('T')[0],
-                        total: oblioResponse.total
+                        number: responseData.number,
+                        url: responseData.link,
+                        series: responseData.seriesName,
+                        issueDate: responseData.issueDate || new Date().toISOString().split('T')[0],
+                        total: responseData.total
                     },
-                    oblioData: oblioResponse
+                    oblioData: responseData
                 };
             } else {
                 // Handle error response
@@ -93,8 +97,15 @@ export class CreateInvoiceFromExtensionAction {
                 logger.error({
                     orderId: graphqlOrder.id,
                     orderNumber,
-                    oblioResponse: oblioResponse
-                }, 'Oblio API returned error response');
+                    oblioResponse: oblioResponse,
+                    responseData: responseData,
+                    hasId: !!responseData?.id,
+                    hasNumber: !!responseData?.number,
+                    dataStructure: {
+                        responseKeys: Object.keys(oblioResponse || {}),
+                        dataKeys: responseData ? Object.keys(responseData) : []
+                    }
+                }, 'Oblio API returned error response - missing required fields');
                 
                 throw new Error(errorMessage);
             }
