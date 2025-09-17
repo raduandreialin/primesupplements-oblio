@@ -10,7 +10,7 @@ import { logger } from '../utils/index.js';
  * 
  * Single Responsibility: Shopify order data updates
  */
-export class UpdateShopifyOrderAction {
+export class UpdateOrderShippingAction {
     constructor(shopifyService = null) {
         // Allow dependency injection for testing
         this.shopifyService = shopifyService || new ShopifyService(
@@ -259,4 +259,4 @@ export class UpdateShopifyOrderAction {
     }
 }
 
-export default UpdateShopifyOrderAction;
+export default UpdateOrderShippingAction;

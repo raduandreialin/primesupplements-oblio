@@ -9,7 +9,7 @@
 // Shipping Actions
 export { CreateShippingLabelAction } from './CreateShippingLabelAction.js';
 export { FulfillShopifyOrderAction } from './FulfillShopifyOrderAction.js';
-export { UpdateShopifyOrderAction } from './UpdateShopifyOrderAction.js';
+export { UpdateOrderShippingAction } from './UpdateOrderShippingAction.js';
 export { CancelAwbAction } from './CancelAwbAction.js';
 
 // Invoice Actions
@@ -21,7 +21,7 @@ export { RetryInvoiceAction } from './RetryInvoiceAction.js';
 // Re-export defaults for convenience
 export { default as CreateShippingLabel } from './CreateShippingLabelAction.js';
 export { default as FulfillShopifyOrder } from './FulfillShopifyOrderAction.js';
-export { default as UpdateShopifyOrder } from './UpdateShopifyOrderAction.js';
+export { default as UpdateShopifyOrder } from './UpdateOrderShippingAction.js';
 export { default as CancelAwb } from './CancelAwbAction.js';
 
 export { default as CreateInvoice } from './CreateInvoiceAction.js';

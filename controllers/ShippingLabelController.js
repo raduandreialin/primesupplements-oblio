@@ -1,7 +1,7 @@
 import { 
     CreateShippingLabelAction,
     FulfillShopifyOrderAction,
-    UpdateShopifyOrderAction,
+    UpdateOrderShippingAction,
     CancelAwbAction
 } from '../actions/index.js';
 import { logger } from '../utils/index.js';
@@ -24,7 +24,7 @@ class ShippingLabelController {
         // Initialize actions
         this.createShippingLabelAction = new CreateShippingLabelAction();
         this.fulfillOrderAction = new FulfillShopifyOrderAction();
-        this.updateOrderAction = new UpdateShopifyOrderAction();
+        this.updateOrderAction = new UpdateOrderShippingAction();
         this.cancelAwbAction = new CancelAwbAction();
     }
 

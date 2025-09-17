@@ -34,7 +34,11 @@ export class UpdateOrderInvoiceAction {
             logger.info({ 
                 orderId, 
                 invoiceNumber: invoiceResult.invoice?.number,
-                invoiceSeries: invoiceResult.invoice?.series 
+                invoiceSeries: invoiceResult.invoice?.series,
+                shopifyConfig: {
+                    shopName: this.shopifyService.shopName,
+                    hasAccessToken: !!this.shopifyService.accessToken
+                }
             }, 'Starting Shopify order update with invoice info');
 
             const results = await Promise.allSettled([
@@ -120,10 +124,14 @@ export class UpdateOrderInvoiceAction {
 
             const errorTags = ['EROARE FACTURARE', errorTag];
 
-            // Compose error message
+            // Compose error message with proper error extraction
             const httpStatus = error.statusCode || error.response?.status;
             const statusMessage = error.details?.statusMessage || error.response?.data?.message;
-            const composedMsg = `${retryAttempt > 0 ? 'Retry ' : ''}Facturare esuata: ${error.message || error}${httpStatus ? ` (HTTP ${httpStatus})` : ''}${statusMessage ? ` | ${statusMessage}` : ''}. ${retryAttempt > 0 ? 'Retry t' : 'T'}imestamp: ${new Date().toISOString()}`;
+            
+            // Extract error message properly - handle various error formats
+            const errorMessage = this._extractErrorMessage(error);
+            
+            const composedMsg = `${retryAttempt > 0 ? 'Retry ' : ''}Facturare esuata: ${errorMessage}${httpStatus ? ` (HTTP ${httpStatus})` : ''}${statusMessage ? ` | ${statusMessage}` : ''}. ${retryAttempt > 0 ? 'Retry t' : 'T'}imestamp: ${new Date().toISOString()}`;
 
             const results = await Promise.allSettled([
                 this._addErrorTags(orderId, errorTags, preserveExistingTags),
@@ -209,6 +217,10 @@ export class UpdateOrderInvoiceAction {
      * @private
      */
     async _updateInvoiceMetafields(orderId, invoiceResult) {
+        logger.debug({ 
+            orderId, 
+            invoiceNumber: invoiceResult.invoice?.number 
+        }, 'Updating invoice metafields');
         const metafields = [
             {
                 namespace: 'invoice',
@@ -274,7 +286,7 @@ export class UpdateOrderInvoiceAction {
         }
 
         await this.shopifyService.updateOrderMetafields(orderId, metafields);
-        logger.debug({ orderId, metafieldCount: metafields.length }, 'Invoice metafields updated');
+        logger.info({ orderId, metafieldCount: metafields.length }, 'Invoice metafields updated successfully');
     }
 
     /**
@@ -282,13 +294,17 @@ export class UpdateOrderInvoiceAction {
      * @private
      */
     async _setInvoiceCustomAttributes(orderId, invoiceResult) {
+        logger.debug({ 
+            orderId, 
+            invoiceNumber: invoiceResult.invoice?.number 
+        }, 'Setting invoice custom attributes');
         await this.shopifyService.setInvoiceCustomAttributes(
             orderId,
             invoiceResult.invoice?.number || 'unknown',
             invoiceResult.invoice?.url || '',
             invoiceResult.invoice?.series || process.env.OBLIO_INVOICE_SERIES
         );
-        logger.debug({ orderId }, 'Invoice custom attributes updated');
+        logger.info({ orderId }, 'Invoice custom attributes updated successfully');
     }
 
     /**
@@ -296,6 +312,12 @@ export class UpdateOrderInvoiceAction {
      * @private
      */
     async _updateInvoiceTags(orderId, invoiceResult, removeErrorTags, additionalTags) {
+        logger.debug({ 
+            orderId, 
+            invoiceNumber: invoiceResult.invoice?.number,
+            removeErrorTags,
+            additionalTagsCount: additionalTags?.length || 0
+        }, 'Updating invoice tags');
         const invoiceTags = [
             'oblio-invoiced',
             `FACTURA-${invoiceResult.invoice?.number || 'unknown'}`,
@@ -321,11 +343,12 @@ export class UpdateOrderInvoiceAction {
                 const finalTags = [...new Set([...cleanTags, ...invoiceTags])];
                 await this.shopifyService.tagOrder(orderId, finalTags);
                 
-                logger.debug({ 
+                logger.info({ 
                     orderId, 
                     removedErrorTags: currentTags.length - cleanTags.length,
-                    totalTags: finalTags.length 
-                }, 'Tags updated with error cleanup');
+                    totalTags: finalTags.length,
+                    finalTags: finalTags
+                }, 'Invoice tags updated successfully with error cleanup');
             } catch (error) {
                 // Fallback: just add invoice tags
                 logger.warn({ orderId, error: error.message }, 'Failed to clean error tags, adding invoice tags only');
@@ -334,7 +357,7 @@ export class UpdateOrderInvoiceAction {
         } else {
             // Just add invoice tags
             await this.shopifyService.tagOrder(orderId, invoiceTags);
-            logger.debug({ orderId, invoiceTags }, 'Invoice tags added');
+            logger.info({ orderId, invoiceTags }, 'Invoice tags added successfully');
         }
     }
 
@@ -439,6 +462,66 @@ export class UpdateOrderInvoiceAction {
                 error: error.message
             };
         }
+    }
+
+    /**
+     * Extract readable error message from various error formats
+     * @private
+     */
+    _extractErrorMessage(error) {
+        // Handle string errors
+        if (typeof error === 'string') {
+            return error;
+        }
+
+        // Handle Error objects and error-like objects
+        if (error && typeof error === 'object') {
+            // Try different error message properties
+            if (error.message) {
+                return error.message;
+            }
+            if (error.error) {
+                return typeof error.error === 'string' ? error.error : JSON.stringify(error.error);
+            }
+            if (error.details) {
+                return typeof error.details === 'string' ? error.details : JSON.stringify(error.details);
+            }
+            
+            // If it's an object with useful info, stringify it nicely
+            if (error.statusCode || error.status || error.response) {
+                const status = error.statusCode || error.status || error.response?.status;
+                const message = error.response?.data?.message || error.response?.statusText;
+                return `${status ? `HTTP ${status}` : 'Error'}${message ? `: ${message}` : ''}`;
+            }
+
+            // Last resort: try to extract meaningful info from the object
+            try {
+                const keys = Object.keys(error);
+                if (keys.length > 0) {
+                    // Look for common error properties
+                    const meaningfulKeys = keys.filter(key => 
+                        ['message', 'error', 'details', 'reason', 'description'].includes(key.toLowerCase())
+                    );
+                    
+                    if (meaningfulKeys.length > 0) {
+                        const values = meaningfulKeys.map(key => {
+                            const value = error[key];
+                            const valueStr = typeof value === 'object' ? JSON.stringify(value) : value;
+                            return `${key}: ${valueStr}`;
+                        });
+                        return values.join(', ');
+                    }
+                    
+                    // If no meaningful keys, just show a summary
+                    return `Error object with keys: ${keys.join(', ')}`;
+                }
+            } catch (e) {
+                // If JSON.stringify fails, fall back to generic message
+            }
+        }
+
+        // Fallback for any other case
+        return 'Unknown error occurred';
     }
 }
 

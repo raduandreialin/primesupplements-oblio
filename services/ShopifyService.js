@@ -19,6 +19,20 @@ export default class ShopifyService {
         if (!shopName || !accessToken) {
             throw new Error("Shop name and access token are required");
         }
+        this.shopName = shopName;
+        this.accessToken = accessToken;
+    }
+
+    /**
+     * Convert orderId to GraphQL ID format if needed
+     * @param {string|number} orderId - Order ID in any format
+     * @returns {string} GraphQL formatted order ID
+     */
+    toGraphQLOrderId(orderId) {
+        const orderIdStr = orderId.toString();
+        return orderIdStr.startsWith('gid://shopify/Order/') 
+            ? orderIdStr 
+            : `gid://shopify/Order/${orderIdStr}`;
     }
 
     async client() {
@@ -40,26 +54,38 @@ export default class ShopifyService {
             // Convert tags to string if array
             const tagsString = Array.isArray(tags) ? tags.join(', ') : tags;
             
+            // Extract numeric ID for REST API
+            const numericOrderId = orderId.toString().includes('gid://shopify/Order/') 
+                ? orderId.replace('gid://shopify/Order/', '') 
+                : orderId;
+            
             // Get current order to preserve existing tags
-            const currentOrder = await this.shopify.order.get(orderId);
+            const currentOrder = await this.shopify.order.get(numericOrderId);
             const existingTags = currentOrder.tags || '';
             
-            // Merge existing tags with new tags
-            const allTags = existingTags 
-                ? `${existingTags}, ${tagsString}` 
-                : tagsString;
+            // Replace tags completely (don't merge) to have full control
+            const finalTags = Array.isArray(tags) ? tags.join(', ') : tags;
             
             // Update order with new tags
-            const updatedOrder = await this.shopify.order.update(orderId, {
-                tags: allTags
+            const updatedOrder = await this.shopify.order.update(numericOrderId, {
+                tags: finalTags
             });
             
-            logger.info({ orderId, newTags: tagsString, allTags: updatedOrder.tags }, 'Order tagged successfully');
+            logger.info({ 
+                orderId: numericOrderId, 
+                newTags: finalTags, 
+                previousTags: existingTags 
+            }, 'Order tags updated successfully');
             
             return updatedOrder;
             
         } catch (error) {
-            logger.error({ orderId, tags, error: error.message }, 'Failed to tag order');
+            logger.error({ 
+                orderId, 
+                tags, 
+                error: error.message,
+                stack: error.stack 
+            }, 'Failed to update order tags');
             throw error;
         }
     }
@@ -71,7 +97,12 @@ export default class ShopifyService {
      */
     async getOrder(orderId) {
         try {
-            return await this.shopify.order.get(orderId);
+            // Extract numeric ID for REST API
+            const numericOrderId = orderId.toString().includes('gid://shopify/Order/') 
+                ? orderId.replace('gid://shopify/Order/', '') 
+                : orderId;
+                
+            return await this.shopify.order.get(numericOrderId);
         } catch (error) {
             logger.error({ orderId, error: error.message }, 'Failed to get order');
             throw error;
@@ -86,8 +117,8 @@ export default class ShopifyService {
      */
     async updateOrderMetafields(orderId, metafields) {
         try {
-            // Convert numeric orderId to GraphQL ID format
-            const gqlOrderId = `gid://shopify/Order/${orderId}`;
+            // Convert orderId to GraphQL ID format if needed
+            const gqlOrderId = this.toGraphQLOrderId(orderId);
             
             const mutation = ORDER_UPDATE;
             
@@ -184,8 +215,8 @@ export default class ShopifyService {
      */
     async updateOrderCustomAttributes(orderId, customAttributes) {
         try {
-            // Convert numeric orderId to GraphQL ID format
-            const gqlOrderId = `gid://shopify/Order/${orderId}`;
+            // Convert orderId to GraphQL ID format if needed
+            const gqlOrderId = this.toGraphQLOrderId(orderId);
             
             const mutation = ORDER_UPDATE_CUSTOM_ATTRIBUTES;
             
@@ -227,7 +258,7 @@ export default class ShopifyService {
      */
     async getOrderCustomAttributes(orderId) {
         try {
-            const gqlOrderId = `gid://shopify/Order/${orderId}`;
+            const gqlOrderId = this.toGraphQLOrderId(orderId);
             
             const query = `
                 query GetOrderCustomAttributes($id: ID!) {
@@ -360,7 +391,7 @@ export default class ShopifyService {
      */
     async getOrderWithFulfillmentOrders(orderId) {
         try {
-            const gqlOrderId = `gid://shopify/Order/${orderId}`;
+            const gqlOrderId = this.toGraphQLOrderId(orderId);
             
             const query = GET_ORDER_WITH_FULFILLMENT_ORDERS;
             

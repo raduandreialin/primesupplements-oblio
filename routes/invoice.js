@@ -145,8 +145,20 @@ router.post('/create-from-extension', async (req, res) => {
 
             // Update order with invoice information (metafields, tags, etc.)
             try {
+                logger.info({
+                    orderId,
+                    orderNumber,
+                    invoiceNumber: result.invoice.number,
+                    invoiceResult: {
+                        hasInvoice: !!result.invoice,
+                        invoiceNumber: result.invoice?.number,
+                        invoiceUrl: result.invoice?.url,
+                        invoiceSeries: result.invoice?.series
+                    }
+                }, 'Starting order update with invoice information');
+
                 const updateOrderAction = new UpdateOrderInvoiceAction();
-                await updateOrderAction.execute({
+                const updateResult = await updateOrderAction.execute({
                     orderId,
                     invoiceResult: result,
                     removeErrorTags: true
@@ -155,15 +167,22 @@ router.post('/create-from-extension', async (req, res) => {
                 logger.info({
                     orderId,
                     orderNumber,
-                    invoiceNumber: result.invoice.number
-                }, 'Order updated with invoice information');
+                    invoiceNumber: result.invoice.number,
+                    updateResult: {
+                        success: updateResult.success,
+                        successfulOperations: updateResult.successfulOperations,
+                        totalOperations: updateResult.totalOperations,
+                        failures: updateResult.failures
+                    }
+                }, 'Order update completed with results');
                 
             } catch (updateError) {
-                logger.warn({
+                logger.error({
                     orderId,
                     orderNumber,
                     invoiceNumber: result.invoice.number,
-                    updateError: updateError.message
+                    updateError: updateError.message,
+                    updateStack: updateError.stack
                 }, 'Invoice created but order update failed');
                 // Don't fail the whole operation if order update fails
             }
