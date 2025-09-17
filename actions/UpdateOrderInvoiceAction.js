@@ -41,8 +41,8 @@ export class UpdateOrderInvoiceAction {
                 }
             }, 'Starting Shopify order update with invoice info');
 
+            // Only use custom attributes - no longer using metafields
             const results = await Promise.allSettled([
-                this._updateInvoiceMetafields(orderId, invoiceResult),
                 this._setInvoiceCustomAttributes(orderId, invoiceResult),
                 this._updateInvoiceTags(orderId, invoiceResult, removeErrorTags, additionalTags)
             ]);
@@ -309,13 +309,63 @@ export class UpdateOrderInvoiceAction {
             orderId, 
             invoiceNumber: invoiceResult.invoice?.number 
         }, 'Setting invoice custom attributes');
-        await this.shopifyService.setInvoiceCustomAttributes(
-            orderId,
-            invoiceResult.invoice?.number || 'unknown',
-            invoiceResult.invoice?.url || '',
-            invoiceResult.invoice?.series || process.env.OBLIO_INVOICE_SERIES
-        );
-        logger.info({ orderId }, 'Invoice custom attributes updated successfully');
+        
+        const customAttributes = [
+            {
+                name: 'INVOICE_ID',
+                value: invoiceResult.oblioData?.id || invoiceResult.invoice?.id || 'unknown'
+            },
+            {
+                name: 'INVOICE_NUMBER',
+                value: invoiceResult.invoice?.number || 'unknown'
+            },
+            {
+                name: 'INVOICE_SERIES',
+                value: invoiceResult.invoice?.series || process.env.OBLIO_INVOICE_SERIES || 'PRS'
+            },
+            {
+                name: 'INVOICE_URL',
+                value: invoiceResult.invoice?.url || ''
+            },
+            {
+                name: 'INVOICE_TOTAL',
+                value: invoiceResult.invoice?.total?.toString() || '0'
+            },
+            {
+                name: 'INVOICE_CURRENCY',
+                value: invoiceResult.invoice?.currency || 'RON'
+            },
+            {
+                name: 'INVOICE_ISSUE_DATE',
+                value: invoiceResult.invoice?.issueDate || new Date().toISOString().split('T')[0]
+            },
+            {
+                name: 'INVOICE_CREATED_AT',
+                value: new Date().toISOString()
+            }
+        ];
+
+        // Add client information if available
+        if (invoiceResult.invoice?.clientName) {
+            customAttributes.push({
+                name: 'INVOICE_CLIENT_NAME',
+                value: invoiceResult.invoice.clientName
+            });
+        }
+
+        if (invoiceResult.invoice?.clientCif) {
+            customAttributes.push({
+                name: 'INVOICE_CLIENT_CIF',
+                value: invoiceResult.invoice.clientCif
+            });
+        }
+
+        await this.shopifyService.updateOrderCustomAttributes(orderId, customAttributes);
+        logger.info({ 
+            orderId, 
+            attributeCount: customAttributes.length,
+            invoiceNumber: invoiceResult.invoice?.number 
+        }, 'Invoice custom attributes updated successfully');
     }
 
     /**
@@ -406,7 +456,7 @@ export class UpdateOrderInvoiceAction {
      * @private
      */
     _getOperationName(index) {
-        const operations = ['metafields', 'customAttributes', 'tags'];
+        const operations = ['customAttributes', 'tags'];
         return operations[index] || 'unknown';
     }
 
@@ -437,20 +487,31 @@ export class UpdateOrderInvoiceAction {
                 tag.startsWith('error-')
             );
 
-            // Try to get invoice metafields
+            // Get invoice data from custom attributes (note_attributes)
             let invoiceNumber = null;
             let invoiceUrl = null;
+            let invoiceSeries = null;
+            let invoiceTotal = null;
             
-            if (order.metafields) {
-                const invoiceNumberField = order.metafields.find(m => 
-                    m.namespace === 'invoice' && m.key === 'number'
-                );
-                const invoiceUrlField = order.metafields.find(m => 
-                    m.namespace === 'invoice' && m.key === 'url'
-                );
+            if (order.note_attributes && Array.isArray(order.note_attributes)) {
+                const invoiceNumberAttr = order.note_attributes.find(attr => attr.name === 'INVOICE_NUMBER');
+                const invoiceUrlAttr = order.note_attributes.find(attr => attr.name === 'INVOICE_URL');
+                const invoiceSeriesAttr = order.note_attributes.find(attr => attr.name === 'INVOICE_SERIES');
+                const invoiceTotalAttr = order.note_attributes.find(attr => attr.name === 'INVOICE_TOTAL');
                 
-                invoiceNumber = invoiceNumberField?.value;
-                invoiceUrl = invoiceUrlField?.value;
+                invoiceNumber = invoiceNumberAttr?.value;
+                invoiceUrl = invoiceUrlAttr?.value;
+                invoiceSeries = invoiceSeriesAttr?.value;
+                invoiceTotal = invoiceTotalAttr?.value;
+            }
+            
+            // Fallback: Extract invoice number from tags if custom attributes are not available
+            if (!invoiceNumber && hasInvoiceTag) {
+                const facturaTag = tags.find(tag => tag.startsWith('FACTURA-'));
+                if (facturaTag) {
+                    invoiceNumber = facturaTag.replace('FACTURA-', '');
+                    logger.debug({ orderId, invoiceNumber, source: 'tag' }, 'Extracted invoice number from tag as fallback');
+                }
             }
 
             return {

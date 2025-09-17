@@ -47,7 +47,7 @@ export function InvoiceStatus({
             <InlineStack gap="small" blockAlignment="center">
               <Text>Unable to check invoice status</Text>
               {onRefreshStatus && (
-                <Button onPress={onRefreshStatus} variant="plain" size="small">
+                <Button onPress={onRefreshStatus} variant='secondary' >
                   Retry
                 </Button>
               )}
@@ -64,15 +64,7 @@ export function InvoiceStatus({
     <Section>
       <BlockStack gap="small">
         <InlineStack gap="small" blockAlignment="center">
-          <Text fontWeight="bold">Invoice Status</Text>
-          <Badge tone={statusBadge.tone}>
-            {statusBadge.text}
-          </Badge>
-          {onRefreshStatus && (
-            <Button onPress={onRefreshStatus} variant="plain" size="small">
-              Refresh
-            </Button>
-          )}
+          <Text fontWeight="bold">Invoice for this order is already created</Text>
         </InlineStack>
 
         {/* Success State */}
@@ -86,7 +78,6 @@ export function InvoiceStatus({
                   <Button 
                     onPress={() => onViewInvoice(status.invoiceUrl!)} 
                     variant="secondary"
-                    size="small"
                   >
                     View Invoice
                   </Button>
@@ -94,7 +85,7 @@ export function InvoiceStatus({
               )}
               
               {/* Additional invoice info */}
-              <BlockStack gap="extraTight">
+              <BlockStack gap="small">
                 <Text>Status: Invoiced</Text>
                 {status.tags && status.tags.length > 0 && (
                   <Text>Tags: {status.tags.join(', ')}</Text>
@@ -116,7 +107,7 @@ export function InvoiceStatus({
               
               {onRetry && (
                 <InlineStack gap="small">
-                  <Button onPress={onRetry} variant="primary" size="small">
+                  <Button onPress={onRetry} variant="primary" >
                     Retry Invoice Creation
                   </Button>
                 </InlineStack>
@@ -146,7 +137,6 @@ export function InvoiceStatus({
                 <Button 
                   onPress={() => onViewInvoice(status.invoiceUrl!)} 
                   variant="secondary"
-                  size="small"
                 >
                   View Existing Invoice
                 </Button>

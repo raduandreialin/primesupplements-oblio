@@ -91,12 +91,15 @@ function App() {
   // Determine initial step based on invoice status and order data
   useEffect(() => {
     if (invoiceStatus && orderData && !loading) {
-      if (!invoiceStatus.hasInvoice && !invoiceStatus.hasError) {
-        // If order is not invoiced and has no errors, show form directly
-        setCurrentStep('form');
-      } else {
-        // Otherwise show status (for existing invoices or errors)
+      if (invoiceStatus.hasInvoice) {
+        // If invoice already exists, always show status (prevent duplicate creation)
         setCurrentStep('status');
+      } else if (invoiceStatus.hasError) {
+        // If there are errors, show status with retry option
+        setCurrentStep('status');
+      } else {
+        // Only if no invoice and no errors, show form for new invoice creation
+        setCurrentStep('form');
       }
     }
   }, [invoiceStatus, orderData, loading]);
@@ -124,13 +127,22 @@ function App() {
   const checkInvoiceStatus = async (orderId: string) => {
     try {
       console.log('Checking invoice status for order:', orderId);
-      // Use the full Shopify order ID for status check
-      const response = await getInvoiceStatusRequest(orderInfo.id);
+      // Extract numeric order ID from GraphQL ID for the backend API
+      const numericOrderId = orderId ? orderId.split('/').pop() : orderInfo.orderNumber;
+      if (!numericOrderId) {
+        throw new Error('Unable to extract order ID');
+      }
+      
+      const response = await getInvoiceStatusRequest(numericOrderId);
       console.log('Invoice status response:', response);
       
-      if (response.success && response.data?.status) {
-        setInvoiceStatus(response.data.status);
+      // TypeScript workaround: the status property is added via spread operator in API utils
+      const responseWithStatus = response as any;
+      if (response.success && responseWithStatus.status) {
+        console.log('Setting invoice status:', responseWithStatus.status);
+        setInvoiceStatus(responseWithStatus.status);
       } else {
+        console.log('No valid status in response, using default');
         // Set default status if no invoice exists
         setInvoiceStatus({
           hasInvoice: false,
@@ -591,11 +603,6 @@ function App() {
           <Banner tone="critical">
             <Text>{error}</Text>
           </Banner>
-        )}
-
-        {/* Order Information Header */}
-        {orderInfo.name && (
-          <Text fontWeight="bold">Order: {orderInfo.name}</Text>
         )}
 
         {/* Step-based Content */}

@@ -102,7 +102,8 @@ export default class ShopifyService {
                 ? orderId.replace('gid://shopify/Order/', '') 
                 : orderId;
                 
-            return await this.shopify.order.get(numericOrderId);
+            // Fetch order with custom attributes (note_attributes) - no longer using metafields
+            return await this.shopify.order.get(numericOrderId, { fields: 'id,name,email,created_at,updated_at,tags,note_attributes,financial_status,fulfillment_status,fulfillments' });
         } catch (error) {
             logger.error({ orderId, error: error.message }, 'Failed to get order');
             throw error;

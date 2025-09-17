@@ -194,7 +194,7 @@ export function InvoiceForm({
           />
 
           {/* Basic Options */}
-          <BlockStack gap="small">
+          <InlineStack gap="small">
             <Checkbox
               checked={invoiceOptions.sendEmail !== false}
               onChange={(checked) => handleOptionsChange('sendEmail', checked)}
@@ -218,7 +218,7 @@ export function InvoiceForm({
             >
               Mark as paid (if order is paid in Shopify)
             </Checkbox>
-          </BlockStack>
+          </InlineStack>
 
         </BlockStack>
       </Section>

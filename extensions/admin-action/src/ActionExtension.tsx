@@ -81,6 +81,10 @@ function App() {
   const [labelResult, setLabelResult] = useState(null);
   const [showForm, setShowForm] = useState(true); // Show form by default
   
+  // AWB status state
+  const [awbStatus, setAwbStatus] = useState(null);
+  const [awbStatusLoading, setAwbStatusLoading] = useState(false);
+  
   // Extract order information from the selected data provided by Shopify
   useEffect(() => {
     
@@ -100,6 +104,9 @@ function App() {
       
       // Try to get additional order information with basic fields
       tryGetBasicOrderInfo(selectedOrder.id);
+      
+      // Check if AWB already exists
+      checkAwbStatus(selectedOrder.id);
     }
   }, [data.selected]);
   
@@ -281,6 +288,45 @@ function App() {
     }
   };
 
+  // Check if AWB already exists for this order
+  const checkAwbStatus = async (orderId: string) => {
+    try {
+      setAwbStatusLoading(true);
+      
+      // Extract numeric order ID from GraphQL ID
+      const numericOrderId = orderId ? orderId.split('/').pop() : '';
+      
+      const backendUrl = 'https://primesupplements-oblio-production.up.railway.app';
+      const response = await fetch(`${backendUrl}/api/orders/${numericOrderId}/awb-url`);
+      
+      if (response.ok) {
+        const awbData = await response.json();
+        if (awbData.success && awbData.awbNumber) {
+          setAwbStatus({
+            exists: true,
+            awbNumber: awbData.awbNumber,
+            awbUrl: awbData.awbUrl
+          });
+          setShowForm(false); // Hide form if AWB already exists
+        } else {
+          setAwbStatus({ exists: false });
+          setShowForm(true); // Show form if no AWB exists
+        }
+      } else {
+        // If 404, no AWB exists
+        setAwbStatus({ exists: false });
+        setShowForm(true);
+      }
+    } catch (error) {
+      console.error('Error checking AWB status:', error);
+      // On error, assume no AWB exists to allow creation
+      setAwbStatus({ exists: false });
+      setShowForm(true);
+    } finally {
+      setAwbStatusLoading(false);
+    }
+  };
+
   // Function to fulfill order with Cargus
   const fulfillOrderWithCargus = async () => {
     try {
@@ -372,7 +418,7 @@ function App() {
               fulfillOrderWithCargus();
             }
           }}
-          disabled={isFulfillingOrder || !validateShippingAddress(shippingAddress).isValid}
+          disabled={isFulfillingOrder || !validateShippingAddress(shippingAddress).isValid || awbStatus?.exists}
           variant={labelResult ? 'secondary' : 'primary'}
         >
           {labelResult ? 'Done' : 'Fulfill with Cargus'}
@@ -404,6 +450,23 @@ function App() {
           </Banner>
         )}
 
+        {/* AWB Status Check */}
+        {awbStatusLoading && (
+          <Banner>
+            <Text>Checking shipping label status...</Text>
+          </Banner>
+        )}
+
+        {awbStatus?.exists && (
+          <Banner>
+            <BlockStack gap="small">
+              <Text fontWeight="bold">Shipping Label Already Created</Text>
+              <Text>AWB Number: {awbStatus.awbNumber}</Text>
+              <Text>This order already has a shipping label. You cannot create another one.</Text>
+            </BlockStack>
+          </Banner>
+        )}
+
         {/* Success State - Toast-like Banner */}
         {labelResult && (
           <Banner tone="success">
@@ -415,7 +478,7 @@ function App() {
         )}
 
 
-         {!labelResult && (
+         {!labelResult && !awbStatus?.exists && (
            <BlockStack gap="large">
 
             {/* Carrier & Service - Compact Row */}

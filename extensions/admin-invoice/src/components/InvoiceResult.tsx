@@ -84,14 +84,14 @@ export function InvoiceResultDisplay({
                 <Button 
                   onPress={() => onViewInvoice(result.invoice!.url)} 
                   variant="primary"
-                  size="small"
+                 
                 >
                   View Invoice
                 </Button>
               )}
               
               {onClose && (
-                <Button onPress={onClose} variant="secondary" size="small">
+                <Button onPress={onClose} variant="secondary" >
                   Done
                 </Button>
               )}
@@ -115,7 +115,7 @@ export function InvoiceResultDisplay({
             
             {/* Error Details */}
             {result.details && typeof result.details === 'object' && (
-              <BlockStack gap="extraTight">
+              <BlockStack gap="small">
                 <Text fontWeight="bold">Details:</Text>
                 {Object.entries(result.details).map(([key, value]) => (
                   <Text key={key}>{key}: {String(value)}</Text>
@@ -125,7 +125,7 @@ export function InvoiceResultDisplay({
             
             {/* Suggestions */}
             {errorInfo.suggestions && errorInfo.suggestions.length > 0 && (
-              <BlockStack gap="extraTight">
+              <BlockStack gap="small">
                 <Text fontWeight="bold">Suggestions:</Text>
                 {errorInfo.suggestions.map((suggestion, index) => (
                   <Text key={index}>• {suggestion}</Text>
@@ -136,13 +136,13 @@ export function InvoiceResultDisplay({
             {/* Actions */}
             <InlineStack gap="small">
               {showRetryButton && errorInfo.retryable && onRetry && (
-                <Button onPress={onRetry} variant="primary" size="small">
+                <Button onPress={onRetry} variant="primary" >
                   Retry
                 </Button>
               )}
               
               {onClose && (
-                <Button onPress={onClose} variant="secondary" size="small">
+                <Button onPress={onClose} variant="secondary" >
                   Close
                 </Button>
               )}

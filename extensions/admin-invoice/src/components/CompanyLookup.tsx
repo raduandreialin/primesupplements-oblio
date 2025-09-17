@@ -163,7 +163,6 @@ export function CompanyLookup({
             <Button
               onPress={handleManualValidation}
               variant="secondary"
-              size="small"
               disabled={disabled}
             >
               Validate
@@ -204,15 +203,13 @@ export function CompanyLookup({
               {suggestions.length > 0 && (
                 <BlockStack gap="small">
                   <Button 
-                    onPress={toggleSuggestions} 
-                    variant="plain" 
-                    size="small"
+                    onPress={toggleSuggestions}  
                   >
                     {showSuggestions ? 'Hide' : 'Show'} suggestions
                   </Button>
                   
                   {showSuggestions && (
-                    <BlockStack gap="extraTight">
+                    <BlockStack gap="small">
                       {suggestions.map((suggestion, index) => (
                         <Text key={index}>• {suggestion}</Text>
                       ))}
