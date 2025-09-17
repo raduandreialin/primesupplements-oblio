@@ -51,7 +51,8 @@ export class CreateInvoiceFromExtensionAction {
                 orderId: graphqlOrder.id,
                 orderNumber,
                 productCount: cleanedInvoiceData.products?.length || 0,
-                clientName: cleanedInvoiceData.client?.name
+                clientName: cleanedInvoiceData.client?.name,
+                products: cleanedInvoiceData.products
             }, 'Sending invoice to Oblio');
 
             // Create invoice via Oblio API
@@ -67,32 +68,32 @@ export class CreateInvoiceFromExtensionAction {
                 }
             }, 'Oblio API response received');
 
-            if (oblioResponse.status === 'success' && oblioResponse.data) {
+            // Check if the response contains invoice data (successful response)
+            if (oblioResponse && oblioResponse.id && oblioResponse.number) {
                 logger.info({
                     orderId: graphqlOrder.id,
-                    invoiceNumber: oblioResponse.data.number,
-                    invoiceUrl: oblioResponse.data.link
+                    invoiceNumber: oblioResponse.number,
+                    invoiceUrl: oblioResponse.link
                 }, 'Invoice created successfully');
 
                 return {
                     success: true,
                     invoice: {
-                        number: oblioResponse.data.number,
-                        url: oblioResponse.data.link,
-                        series: oblioResponse.data.series,
-                        issueDate: oblioResponse.data.issueDate
+                        number: oblioResponse.number,
+                        url: oblioResponse.link,
+                        series: oblioResponse.seriesName,
+                        issueDate: oblioResponse.issueDate || new Date().toISOString().split('T')[0],
+                        total: oblioResponse.total
                     },
-                    oblioData: oblioResponse.data
+                    oblioData: oblioResponse
                 };
             } else {
+                // Handle error response
                 const errorMessage = oblioResponse.message || oblioResponse.error || 'Unknown Oblio API error';
                 logger.error({
                     orderId: graphqlOrder.id,
                     orderNumber,
-                    oblioStatus: oblioResponse.status,
-                    oblioMessage: oblioResponse.message,
-                    oblioError: oblioResponse.error,
-                    oblioData: oblioResponse.data
+                    oblioResponse: oblioResponse
                 }, 'Oblio API returned error response');
                 
                 throw new Error(errorMessage);
@@ -216,6 +217,13 @@ export class CreateInvoiceFromExtensionAction {
             // Add discount if exists
             const itemDiscount = this._getItemDiscountFromGraphQL(item);
             if (itemDiscount > 0) {
+                logger.info({
+                    orderId: graphqlOrder.id,
+                    itemTitle: item.title,
+                    discountAmount: itemDiscount,
+                    discountAllocations: item.discountAllocations
+                }, 'Adding discount for item');
+                
                 products.push({
                     name: `Discount ${item.title}`,
                     discountType: 'valoric',
@@ -374,9 +382,10 @@ export class CreateInvoiceFromExtensionAction {
      */
     _filterValidProducts(products) {
         return products.filter(product => {
-            const isValid = product.name && 
-                           product.price > 0 && 
-                           product.quantity > 0;
+            // Discount products don't have price/quantity, only discount amount
+            const isDiscount = product.discountType && product.discount !== undefined;
+            const isValidProduct = product.name && product.price > 0 && product.quantity > 0;
+            const isValid = isDiscount || isValidProduct;
             
             if (!isValid) {
                 logger.warn({ product }, 'Filtering out invalid product');
