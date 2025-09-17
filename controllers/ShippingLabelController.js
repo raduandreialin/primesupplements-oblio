@@ -70,6 +70,26 @@ class ShippingLabelController {
                 carrier: 'Cargus' 
             }, 'Processing shipping label creation');
 
+            // Check if AWB already exists
+            const existingAwb = await this._checkExistingAwb(order);
+            if (existingAwb.exists) {
+                logger.info({ 
+                    orderId: order.id, 
+                    orderNumber: order.order_number,
+                    existingAwbNumber: existingAwb.awbNumber
+                }, 'AWB already exists for this order');
+
+                return res.status(409).json({
+                    success: false,
+                    error: 'AWB already created',
+                    message: `Shipping label already exists for this order. AWB Number: ${existingAwb.awbNumber}`,
+                    existingAwb: {
+                        awbNumber: existingAwb.awbNumber,
+                        createdAt: existingAwb.createdAt
+                    }
+                });
+            }
+
             // Step 1: Create shipping label
             const labelResult = await this.createShippingLabelAction.execute({
                 order,
@@ -347,6 +367,71 @@ class ShippingLabelController {
         }
 
         return responseData;
+    }
+
+    /**
+     * Check if AWB already exists for an order
+     * @private
+     */
+    async _checkExistingAwb(order) {
+        try {
+            // Check custom attributes (note_attributes) for AWB_NUMBER
+            if (order.note_attributes && Array.isArray(order.note_attributes)) {
+                const awbAttribute = order.note_attributes.find(attr => attr.name === 'AWB_NUMBER');
+                
+                if (awbAttribute && awbAttribute.value) {
+                    logger.debug({ 
+                        orderId: order.id, 
+                        awbNumber: awbAttribute.value 
+                    }, 'Found existing AWB in custom attributes');
+                    
+                    return {
+                        exists: true,
+                        awbNumber: awbAttribute.value,
+                        createdAt: null // Custom attributes don't have creation date
+                    };
+                }
+            }
+
+            // Additional check: Look for fulfillments with tracking numbers
+            if (order.fulfillments && order.fulfillments.length > 0) {
+                const fulfillmentWithTracking = order.fulfillments.find(f => 
+                    f.tracking_number && f.tracking_number.trim() !== ''
+                );
+                
+                if (fulfillmentWithTracking) {
+                    logger.debug({ 
+                        orderId: order.id, 
+                        trackingNumber: fulfillmentWithTracking.tracking_number 
+                    }, 'Found existing AWB in fulfillments');
+                    
+                    return {
+                        exists: true,
+                        awbNumber: fulfillmentWithTracking.tracking_number,
+                        createdAt: fulfillmentWithTracking.created_at
+                    };
+                }
+            }
+
+            return {
+                exists: false,
+                awbNumber: null,
+                createdAt: null
+            };
+
+        } catch (error) {
+            logger.error({ 
+                orderId: order.id, 
+                error: error.message 
+            }, 'Error checking existing AWB');
+            
+            // In case of error, assume no AWB exists to avoid blocking legitimate requests
+            return {
+                exists: false,
+                awbNumber: null,
+                createdAt: null
+            };
+        }
     }
 }
 
