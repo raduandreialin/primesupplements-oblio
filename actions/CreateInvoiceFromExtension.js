@@ -8,7 +8,7 @@ import config from '../config/AppConfig.js';
  * This action works directly with Shopify GraphQL order data,
  * eliminating the need for REST transformation.
  */
-export class CreateInvoiceFromGraphQLAction {
+export class CreateInvoiceFromExtensionAction {
     constructor(oblioService = null) {
         this.oblioService = oblioService || new OblioService();
     }
@@ -57,6 +57,16 @@ export class CreateInvoiceFromGraphQLAction {
             // Create invoice via Oblio API
             const oblioResponse = await this.oblioService.createInvoice(cleanedInvoiceData);
 
+            logger.info({
+                orderId: graphqlOrder.id,
+                orderNumber,
+                oblioResponse: {
+                    status: oblioResponse.status,
+                    message: oblioResponse.message,
+                    hasData: !!oblioResponse.data
+                }
+            }, 'Oblio API response received');
+
             if (oblioResponse.status === 'success' && oblioResponse.data) {
                 logger.info({
                     orderId: graphqlOrder.id,
@@ -75,7 +85,17 @@ export class CreateInvoiceFromGraphQLAction {
                     oblioData: oblioResponse.data
                 };
             } else {
-                throw new Error(oblioResponse.message || 'Unknown Oblio API error');
+                const errorMessage = oblioResponse.message || oblioResponse.error || 'Unknown Oblio API error';
+                logger.error({
+                    orderId: graphqlOrder.id,
+                    orderNumber,
+                    oblioStatus: oblioResponse.status,
+                    oblioMessage: oblioResponse.message,
+                    oblioError: oblioResponse.error,
+                    oblioData: oblioResponse.data
+                }, 'Oblio API returned error response');
+                
+                throw new Error(errorMessage);
             }
 
         } catch (error) {
@@ -431,4 +451,4 @@ export class CreateInvoiceFromGraphQLAction {
     }
 }
 
-export default CreateInvoiceFromGraphQLAction;
+export default CreateInvoiceFromExtensionAction;

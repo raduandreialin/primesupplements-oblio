@@ -1,6 +1,6 @@
 import express from 'express';
 import InvoiceController from '../controllers/InvoiceController.js';
-import { CreateInvoiceFromGraphQLAction } from '../actions/CreateInvoiceFromGraphQLAction.js';
+import { CreateInvoiceFromExtensionAction } from '../actions/CreateInvoiceFromExtension.js';
 import { logger } from '../utils/index.js';
 
 const router = express.Router();
@@ -127,7 +127,7 @@ router.post('/create-from-extension', async (req, res) => {
         }, 'Processing extension invoice creation request');
 
         // Create invoice using GraphQL-native action
-        const createAction = new CreateInvoiceFromGraphQLAction();
+        const createAction = new CreateInvoiceFromExtensionAction();
         const result = await createAction.execute({
             graphqlOrder,
             orderNumber,

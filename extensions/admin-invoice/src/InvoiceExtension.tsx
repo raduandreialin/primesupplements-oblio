@@ -553,7 +553,7 @@ function App() {
         )}
 
         {/* Global Error State */}
-        {error && currentStep !== 'result' && (
+        {error && (
           <Banner tone="critical">
             <Text>{error}</Text>
           </Banner>
