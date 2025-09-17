@@ -26,6 +26,24 @@ export const ORDER_UPDATE = `
     }
 `;
 
+export const METAFIELDS_SET = `
+    mutation MetafieldsSet($metafields: [MetafieldsSetInput!]!) {
+        metafieldsSet(metafields: $metafields) {
+            metafields {
+                id
+                namespace
+                key
+                value
+                type
+            }
+            userErrors {
+                field
+                message
+            }
+        }
+    }
+`;
+
 export const ORDER_UPDATE_CUSTOM_ATTRIBUTES = `
     mutation OrderUpdate($input: OrderInput!) {
         orderUpdate(input: $input) {

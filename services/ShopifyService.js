@@ -2,7 +2,7 @@ import Shopify from "shopify-api-node";
 import config from "../config/AppConfig.js";
 import { logger } from "../utils/index.js";
 import { GET_ORDER_WITH_FULFILLMENT_ORDERS, FIND_UNFULFILLED_ORDERS } from "../graphql/queries.js";
-import { ORDER_UPDATE, ORDER_UPDATE_CUSTOM_ATTRIBUTES, FULFILLMENT_CREATE_V2 } from "../graphql/mutations.js";
+import { ORDER_UPDATE, ORDER_UPDATE_CUSTOM_ATTRIBUTES, FULFILLMENT_CREATE_V2, METAFIELDS_SET } from "../graphql/mutations.js";
 
 export default class ShopifyService {
     constructor(shopName, accessToken) {
@@ -129,15 +129,36 @@ export default class ShopifyService {
                 }
             };
             
+            logger.info({
+                orderId: gqlOrderId,
+                metafieldCount: metafields.length,
+                metafields: metafields
+            }, 'Sending metafields update to Shopify GraphQL API');
+
             const response = await this.graphQLQuery(mutation, variables);
+            
+            logger.info({
+                orderId: gqlOrderId,
+                response: response
+            }, 'Received GraphQL response for metafields update');
+
             // shopify-api-node returns the data object directly, not wrapped in { data }
             const orderUpdate = response.orderUpdate || response?.data?.orderUpdate;
 
             if (!orderUpdate) {
+                logger.error({
+                    orderId: gqlOrderId,
+                    response: response,
+                    responseKeys: Object.keys(response || {})
+                }, 'Unexpected GraphQL response shape: missing orderUpdate');
                 throw new Error('Unexpected GraphQL response shape: missing orderUpdate');
             }
 
             if (Array.isArray(orderUpdate.userErrors) && orderUpdate.userErrors.length > 0) {
+                logger.error({
+                    orderId: gqlOrderId,
+                    userErrors: orderUpdate.userErrors
+                }, 'GraphQL metafields update returned user errors');
                 throw new Error(`GraphQL errors: ${JSON.stringify(orderUpdate.userErrors)}`);
             }
             
@@ -147,6 +168,77 @@ export default class ShopifyService {
             
         } catch (error) {
             logger.error({ orderId, metafields, error: error.message }, 'Failed to update order metafields');
+            throw error;
+        }
+    }
+
+    /**
+     * Set metafields using the metafieldsSet mutation (newer approach)
+     * @param {string|number} orderId - Shopify order ID
+     * @param {Array} metafields - Array of metafield objects
+     * @returns {Promise<Object>} Metafields set result
+     */
+    async setOrderMetafields(orderId, metafields) {
+        try {
+            // Convert orderId to GraphQL ID format if needed
+            const gqlOrderId = this.toGraphQLOrderId(orderId);
+            
+            // Transform metafields for metafieldsSet mutation
+            const metafieldsInput = metafields.map(metafield => ({
+                ownerId: gqlOrderId,
+                namespace: metafield.namespace,
+                key: metafield.key,
+                value: metafield.value,
+                type: metafield.type
+            }));
+            
+            logger.info({
+                orderId: gqlOrderId,
+                metafieldCount: metafieldsInput.length,
+                metafields: metafieldsInput
+            }, 'Setting metafields using metafieldsSet mutation');
+
+            const mutation = METAFIELDS_SET;
+            const variables = {
+                metafields: metafieldsInput
+            };
+            
+            const response = await this.graphQLQuery(mutation, variables);
+            
+            logger.info({
+                orderId: gqlOrderId,
+                response: response
+            }, 'Received GraphQL response for metafieldsSet');
+
+            const metafieldsSet = response.metafieldsSet || response?.data?.metafieldsSet;
+
+            if (!metafieldsSet) {
+                logger.error({
+                    orderId: gqlOrderId,
+                    response: response,
+                    responseKeys: Object.keys(response || {})
+                }, 'Unexpected GraphQL response shape: missing metafieldsSet');
+                throw new Error('Unexpected GraphQL response shape: missing metafieldsSet');
+            }
+
+            if (Array.isArray(metafieldsSet.userErrors) && metafieldsSet.userErrors.length > 0) {
+                logger.error({
+                    orderId: gqlOrderId,
+                    userErrors: metafieldsSet.userErrors
+                }, 'MetafieldsSet mutation returned user errors');
+                throw new Error(`GraphQL errors: ${JSON.stringify(metafieldsSet.userErrors)}`);
+            }
+            
+            logger.info({ 
+                orderId, 
+                createdMetafields: metafieldsSet.metafields?.length || 0,
+                metafields: metafieldsSet.metafields?.map(m => `${m.namespace}.${m.key}`) || []
+            }, 'Order metafields set successfully using metafieldsSet');
+            
+            return metafieldsSet.metafields;
+            
+        } catch (error) {
+            logger.error({ orderId, metafields, error: error.message }, 'Failed to set order metafields');
             throw error;
         }
     }

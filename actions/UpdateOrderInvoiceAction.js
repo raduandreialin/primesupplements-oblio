@@ -285,8 +285,19 @@ export class UpdateOrderInvoiceAction {
             });
         }
 
-        await this.shopifyService.updateOrderMetafields(orderId, metafields);
-        logger.info({ orderId, metafieldCount: metafields.length }, 'Invoice metafields updated successfully');
+        // Try the newer metafieldsSet mutation first, fallback to orderUpdate if needed
+        try {
+            await this.shopifyService.setOrderMetafields(orderId, metafields);
+            logger.info({ orderId, metafieldCount: metafields.length }, 'Invoice metafields set successfully using metafieldsSet');
+        } catch (metafieldsSetError) {
+            logger.warn({ 
+                orderId, 
+                error: metafieldsSetError.message 
+            }, 'metafieldsSet failed, trying orderUpdate fallback');
+            
+            await this.shopifyService.updateOrderMetafields(orderId, metafields);
+            logger.info({ orderId, metafieldCount: metafields.length }, 'Invoice metafields updated successfully using orderUpdate fallback');
+        }
     }
 
     /**
