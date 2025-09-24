@@ -69,28 +69,9 @@ export function InvoiceStatus({
 
         {/* Success State */}
         {status.hasInvoice && status.invoiceNumber && (
-          <Banner tone="success">
+          <Banner>
             <BlockStack gap="small">
               <Text>Invoice #{status.invoiceNumber} exists for this order</Text>
-              
-              {status.invoiceUrl && onViewInvoice && (
-                <InlineStack gap="small">
-                  <Button 
-                    onPress={() => onViewInvoice(status.invoiceUrl!)} 
-                    variant="secondary"
-                  >
-                    View Invoice
-                  </Button>
-                </InlineStack>
-              )}
-              
-              {/* Additional invoice info */}
-              <BlockStack gap="small">
-                <Text>Status: Invoiced</Text>
-                {status.tags && status.tags.length > 0 && (
-                  <Text>Tags: {status.tags.join(', ')}</Text>
-                )}
-              </BlockStack>
             </BlockStack>
           </Banner>
         )}

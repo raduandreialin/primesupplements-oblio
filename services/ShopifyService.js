@@ -1,7 +1,7 @@
 import Shopify from "shopify-api-node";
 import config from "../config/AppConfig.js";
 import { logger } from "../utils/index.js";
-import { GET_ORDER_WITH_FULFILLMENT_ORDERS, FIND_UNFULFILLED_ORDERS } from "../graphql/queries.js";
+import { GET_ORDER_WITH_FULFILLMENT_ORDERS, FIND_UNFULFILLED_ORDERS, GET_ALL_PRODUCTS } from "../graphql/queries.js";
 import { ORDER_UPDATE, ORDER_UPDATE_CUSTOM_ATTRIBUTES, FULFILLMENT_CREATE_V2, METAFIELDS_SET } from "../graphql/mutations.js";
 
 export default class ShopifyService {
@@ -652,6 +652,85 @@ export default class ShopifyService {
             
         } catch (error) {
             logger.error({ error: error.message }, 'Failed to find unfulfilled orders');
+            throw error;
+        }
+    }
+
+    /**
+     * Get all products with inventory information
+     * @param {Object} options - Query options
+     * @param {number} options.first - Products per page (default: 50)
+     * @param {string} options.query - Search query filter
+     * @returns {Promise<Array>} List of all products
+     */
+    async getAllProducts(options = {}) {
+        try {
+            const { first = 25, query = null } = options;
+            
+            logger.info({ first, query }, 'Fetching all products from Shopify');
+
+            const allProducts = [];
+            let hasNextPage = true;
+            let cursor = null;
+
+            while (hasNextPage) {
+                const variables = { first, after: cursor, query };
+                const response = await this.graphQLQuery(GET_ALL_PRODUCTS, variables);
+                
+                if (!response.products) {
+                    throw new Error('Invalid response: missing products field');
+                }
+
+                const products = response.products.edges.map(edge => edge.node);
+                allProducts.push(...products);
+
+                hasNextPage = response.products.pageInfo.hasNextPage;
+                cursor = response.products.pageInfo.endCursor;
+
+                // Small delay for rate limiting
+                if (hasNextPage) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+            }
+
+            logger.info({ totalProducts: allProducts.length }, 'Successfully fetched all products');
+            return allProducts;
+
+        } catch (error) {
+            logger.error({ options, error: error.message }, 'Failed to fetch all products');
+            throw error;
+        }
+    }
+
+    /**
+     * Get products by SKU
+     * @param {string|Array} skus - Single SKU or array of SKUs
+     * @returns {Promise<Array>} List of products matching SKUs
+     */
+    async getProductsBySku(skus) {
+        try {
+            const skuArray = Array.isArray(skus) ? skus : [skus];
+            logger.info({ skuCount: skuArray.length }, 'Searching products by SKU');
+
+            const searchQuery = skuArray.map(sku => `sku:${sku}`).join(' OR ');
+            const products = await this.getAllProducts({ query: searchQuery });
+
+            // Filter to ensure exact matches
+            const matchedProducts = products.filter(product => {
+                return product.variants?.edges?.some(variantEdge => {
+                    return skuArray.includes(variantEdge.node.sku);
+                });
+            });
+
+            logger.info({ 
+                searchedSKUs: skuArray.length,
+                foundProducts: matchedProducts.length
+            }, 'Products found by SKU');
+
+            return matchedProducts;
+
+        } catch (error) {
+            logger.error({ skus, error: error.message }, 'Failed to get products by SKU');
             throw error;
         }
     }

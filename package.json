@@ -11,7 +11,12 @@
     "test:shipping": "node _tests/shipping-test.js",
     "test:address": "node _tests/address-validation-test.js",
     "test:backend": "node _tests/backend-connectivity-test.js",
-    "test:pickup-points": "node _tests/pickup-points-test.js"
+    "test:pickup-points": "node _tests/pickup-points-test.js",
+    "test:oblio-products": "node _tests/oblio-products-query-test.js",
+    "test:shopify-products": "node _tests/shopify-products-test.js",
+    "test:inventory-sync": "node _tests/inventory-sync-test.js",
+    "sync:preview": "node scripts/sync-inventory.js --dry-run",
+    "sync:inventory": "node scripts/sync-inventory.js"
   },
   "keywords": [
     "oblio",
@@ -30,9 +35,7 @@
     "crypto": "^1.0.1",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
-    "pino": "^8.16.0",
-    "pino-http": "^10.1.0",
-    "pino-pretty": "^10.2.0",
+    "node-cron": "^4.2.1",
     "react": "^18.3.1",
     "react-reconciler": "0.29.0",
     "shopify-api-node": "^3.15.0"

@@ -1,33 +1,34 @@
-import pino from 'pino';
-
-const level = process.env.LOG_LEVEL || (process.env.NODE_ENV === 'production' ? 'info' : 'debug');
-
-const logger = pino({
-  level,
-  base: {
-    service: 'oblio-shopify-integration'
+// Simple console logger for Railway deployment
+const logger = {
+  info: (obj, msg) => {
+    if (typeof obj === 'string') {
+      console.log(`[INFO] ${obj}`);
+    } else {
+      console.log(`[INFO] ${msg || ''}`, obj);
+    }
   },
-  redact: {
-    paths: [
-      'req.headers.authorization',
-      'headers.authorization',
-      'config.headers.Authorization',
-      'accessToken',
-      '*.token',
-      '*.client_secret',
-      '*.clientSecret'
-    ],
-    remove: true
+  error: (obj, msg) => {
+    if (typeof obj === 'string') {
+      console.error(`[ERROR] ${obj}`);
+    } else {
+      console.error(`[ERROR] ${msg || ''}`, obj);
+    }
   },
-  transport: process.env.NODE_ENV === 'production' ? undefined : {
-    target: 'pino-pretty',
-    options: {
-      colorize: true,
-      translateTime: 'SYS:standard',
-      ignore: 'pid,hostname'
+  warn: (obj, msg) => {
+    if (typeof obj === 'string') {
+      console.warn(`[WARN] ${obj}`);
+    } else {
+      console.warn(`[WARN] ${msg || ''}`, obj);
+    }
+  },
+  debug: (obj, msg) => {
+    if (typeof obj === 'string') {
+      console.log(`[DEBUG] ${obj}`);
+    } else {
+      console.log(`[DEBUG] ${msg || ''}`, obj);
     }
   }
-});
+};
 
 export default logger;
 

@@ -111,3 +111,56 @@ export const FIND_UNFULFILLED_ORDERS = `
         }
     }
 `;
+
+export const GET_ALL_PRODUCTS = `
+    query GetAllProducts($first: Int!, $after: String, $query: String) {
+        products(first: $first, after: $after, query: $query) {
+            edges {
+                cursor
+                node {
+                    id
+                    title
+                    handle
+                    productType
+                    vendor
+                    status
+                    totalInventory
+                    tracksInventory
+                    variants(first: 50) {
+                        edges {
+                            node {
+                                id
+                                title
+                                sku
+                                price
+                                inventoryQuantity
+                                inventoryItem {
+                                    id
+                                    tracked
+                                    inventoryLevels(first: 3) {
+                                        edges {
+                                            node {
+                                                quantities(names: ["available"]) {
+                                                    name
+                                                    quantity
+                                                }
+                                                location {
+                                                    id
+                                                    name
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            pageInfo {
+                hasNextPage
+                endCursor
+            }
+        }
+    }
+`;

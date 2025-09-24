@@ -81,3 +81,22 @@ export const FULFILLMENT_CREATE_V2 = `
         }
     }
 `;
+
+export const INVENTORY_SET_QUANTITIES = `
+    mutation InventorySetQuantities($input: InventorySetQuantitiesInput!) {
+        inventorySetQuantities(input: $input) {
+            inventoryAdjustmentGroup {
+                id
+                reason
+                changes {
+                    name
+                    delta
+                }
+            }
+            userErrors {
+                field
+                message
+            }
+        }
+    }
+`;

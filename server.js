@@ -1,12 +1,12 @@
 import express from "express";
 import cors from "cors";
-import pinoHttp from 'pino-http';
 import { logger } from './utils/index.js';
 import webhookRoutes from "./routes/webhooks.js";
 import shippingRoutes from "./routes/shipping.js";
 import printRoutes from "./routes/print.js";
 import invoiceRoutes from "./routes/invoice.js";
 import { captureRawBody } from "./middlewares/verifyShopifyWebhook.js";
+import InventorySyncJob from "./jobs/inventorySyncJob.js";
 
 const app = express();
 
@@ -27,13 +27,11 @@ app.use(cors({
   optionsSuccessStatus: 200 // Some legacy browsers choke on 204
 }));
 
-// Request logging
-app.use(pinoHttp({
-  logger,
-  redact: {
-    paths: ['req.headers.authorization']
-  }
-}));
+// Request logging middleware
+app.use((req, res, next) => {
+  logger.info(`${req.method} ${req.url}`);
+  next();
+});
 
 // Capture raw body for webhook verification (before JSON parsing)
 app.use('/webhooks/shopify', express.raw({ 
@@ -65,4 +63,8 @@ app.listen(PORT, () => {
     logger.info({ endpoint: `/invoice/anaf/validate` }, 'ANAF validation endpoint available');
     logger.info({ endpoint: `/shipping/create` }, 'Shipping label endpoint available');
     logger.info({ endpoint: `/shipping/create-label` }, 'Extension shipping label endpoint available (secured)');
+
+    // Start inventory sync cron job
+    const inventoryJob = new InventorySyncJob();
+    inventoryJob.start();
 });
