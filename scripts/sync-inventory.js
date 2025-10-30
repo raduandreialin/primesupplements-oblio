@@ -33,25 +33,5 @@ async function runInventorySync() {
     }
 }
 
-// Show usage if help requested
-if (process.argv.includes('--help') || process.argv.includes('-h')) {
-    console.log(`
-Inventory Sync Script
-
-Usage:
-  node scripts/sync-inventory.js [options]
-
-Options:
-  --dry-run, -d          Preview changes without updating Shopify
-  --sku=SKU1,SKU2       Only sync specific SKUs (comma-separated)
-  --help, -h            Show this help message
-
-Examples:
-  node scripts/sync-inventory.js --dry-run
-  node scripts/sync-inventory.js --sku=BT-CUTIE-CAPSUNI,BT-ALUNE-CARAMEL
-  node scripts/sync-inventory.js
-    `);
-    process.exit(0);
-}
 
 runInventorySync();

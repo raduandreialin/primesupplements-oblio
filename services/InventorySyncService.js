@@ -175,7 +175,7 @@ export default class InventorySyncService {
 
         const input = {
             reason: 'correction',
-            name: 'available',
+            name: 'on_hand',
             quantities: [{
                 inventoryItemId,
                 locationId,

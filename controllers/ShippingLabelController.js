@@ -35,14 +35,11 @@ class ShippingLabelController {
      */
     async createFromExtension(req, res) {
         try {
-            logger.info({ body: req.body }, 'Received shipping label request from extension');
-            
             // Extract and validate request data
             const requestData = this._extractRequestData(req.body);
             const validationError = this._validateRequestData(requestData);
             
             if (validationError) {
-                logger.warn({ requestData, validationError }, 'Invalid request data');
                 return res.status(400).json({
                     success: false,
                     error: validationError
@@ -63,21 +60,12 @@ class ShippingLabelController {
                 notifyCustomer
             } = requestData;
 
-            logger.info({ 
-                orderId: order.id, 
-                orderNumber: order.order_number, 
-                service,
-                carrier: 'Cargus' 
-            }, 'Processing shipping label creation');
+            logger.info(`📦 AWB request: Order ${orderNumber}`);
 
             // Check if AWB already exists
             const existingAwb = await this._checkExistingAwb(order);
             if (existingAwb.exists) {
-                logger.info({ 
-                    orderId: order.id, 
-                    orderNumber: order.order_number,
-                    existingAwbNumber: existingAwb.awbNumber
-                }, 'AWB already exists for this order');
+                logger.warn(`⚠️ AWB already exists: ${existingAwb.awbNumber}`);
 
                 return res.status(409).json({
                     success: false,
@@ -115,23 +103,11 @@ class ShippingLabelController {
                     carrier: labelResult.carrier
                 });
 
-                if (fulfillmentResult.success) {
-                    logger.info({ 
-                        orderId: numericOrderId,
-                        fulfillmentId: fulfillmentResult.fulfillmentId 
-                    }, 'Order fulfilled successfully');
-                } else {
-                    logger.warn({ 
-                        orderId: numericOrderId,
-                        error: fulfillmentResult.error 
-                    }, 'Order fulfillment failed, but AWB was created');
+                if (!fulfillmentResult.success) {
+                    logger.warn(`⚠️ Fulfillment failed, but AWB ${labelResult.trackingNumber} created`);
                 }
             } catch (fulfillmentError) {
-                logger.error({ 
-                    orderId: numericOrderId,
-                    error: fulfillmentError.message 
-                }, 'Fulfillment action failed');
-                // Continue - we still want to update order and return AWB data
+                logger.warn(`⚠️ Fulfillment error, but AWB ${labelResult.trackingNumber} created`);
             }
 
             // Step 3: Update Shopify order with shipping info (non-blocking)
@@ -145,34 +121,19 @@ class ShippingLabelController {
                     trackingUrl: labelResult.trackingUrl,
                     additionalData
                 });
-
-                logger.info({ orderId: numericOrderId }, 'Order updated with shipping info');
             } catch (updateError) {
-                logger.error({ 
-                    orderId: numericOrderId,
-                    error: updateError.message 
-                }, 'Order update failed');
-                // Continue - we still want to return the AWB data
+                // Silent fail - AWB was still created
             }
 
             // Step 4: Prepare and send response
             const responseData = this._buildResponse(labelResult, fulfillmentResult, orderId);
             
-            logger.info({
-                orderId,
-                trackingNumber: labelResult.trackingNumber,
-                fulfillmentSuccess: fulfillmentResult?.success || false,
-                cost: labelResult.cost
-            }, 'Shipping label creation completed successfully');
+            logger.info(`✅ AWB ${labelResult.trackingNumber} created for order ${orderNumber}`);
 
             res.json(responseData);
 
         } catch (error) {
-            logger.error({ 
-                orderId: req.body?.orderId,
-                error: error.message,
-                stack: error.stack
-            }, 'Failed to create shipping label from extension');
+            logger.error(`❌ AWB creation failed: ${error.message}`);
 
             res.status(500).json({
                 success: false,
@@ -192,42 +153,26 @@ class ShippingLabelController {
         
         try {
             const fulfillment = req.body;
-            logger.info({ 
-                fulfillmentId: fulfillment.id,
-                orderId: fulfillment.order_id,
-                status: fulfillment.status,
-                trackingNumber: fulfillment.tracking_number
-            }, 'Processing Shopify fulfillment cancellation webhook');
+            logger.info(`🚫 AWB cancellation: ${fulfillment.tracking_number || fulfillment.id}`);
 
             // Process cancellation using action
             const cancellationResult = await this.cancelAwbAction.processWebhookCancellation(fulfillment);
 
             if (cancellationResult.success) {
-                // Update order with cancellation info
                 if (!cancellationResult.skipped) {
                     await this.updateOrderAction.addCancellationInfo(
                         fulfillment.order_id, 
                         cancellationResult.awbBarcode
                     );
+                    logger.info(`✅ AWB ${cancellationResult.awbBarcode} cancelled`);
                 }
             } else {
-                // Mark cancellation as failed
                 await this.updateOrderAction.markCancellationFailed(fulfillment.order_id);
+                logger.error(`❌ AWB cancellation failed`);
             }
 
-            logger.info({
-                fulfillmentId: fulfillment.id,
-                orderId: fulfillment.order_id,
-                cancellationSuccess: cancellationResult.success,
-                skipped: cancellationResult.skipped
-            }, 'Fulfillment cancellation webhook processed');
-
         } catch (error) {
-            logger.error({ 
-                error: error.message, 
-                stack: error.stack,
-                fulfillmentData: req.body 
-            }, 'Error processing fulfillment cancellation webhook');
+            logger.error(`❌ Cancellation webhook error: ${error.message}`);
         }
     }
 
@@ -380,15 +325,10 @@ class ShippingLabelController {
                 const awbAttribute = order.note_attributes.find(attr => attr.name === 'AWB_NUMBER');
                 
                 if (awbAttribute && awbAttribute.value) {
-                    logger.debug({ 
-                        orderId: order.id, 
-                        awbNumber: awbAttribute.value 
-                    }, 'Found existing AWB in custom attributes');
-                    
                     return {
                         exists: true,
                         awbNumber: awbAttribute.value,
-                        createdAt: null // Custom attributes don't have creation date
+                        createdAt: null
                     };
                 }
             }
@@ -400,11 +340,6 @@ class ShippingLabelController {
                 );
                 
                 if (fulfillmentWithTracking) {
-                    logger.debug({ 
-                        orderId: order.id, 
-                        trackingNumber: fulfillmentWithTracking.tracking_number 
-                    }, 'Found existing AWB in fulfillments');
-                    
                     return {
                         exists: true,
                         awbNumber: fulfillmentWithTracking.tracking_number,
@@ -420,11 +355,6 @@ class ShippingLabelController {
             };
 
         } catch (error) {
-            logger.error({ 
-                orderId: order.id, 
-                error: error.message 
-            }, 'Error checking existing AWB');
-            
             // In case of error, assume no AWB exists to avoid blocking legitimate requests
             return {
                 exists: false,

@@ -312,35 +312,35 @@ export class UpdateOrderInvoiceAction {
         
         const customAttributes = [
             {
-                name: 'INVOICE_ID',
+                key: 'INVOICE_ID',
                 value: invoiceResult.oblioData?.id || invoiceResult.invoice?.id || 'unknown'
             },
             {
-                name: 'INVOICE_NUMBER',
+                key: 'INVOICE_NUMBER',
                 value: invoiceResult.invoice?.number || 'unknown'
             },
             {
-                name: 'INVOICE_SERIES',
+                key: 'INVOICE_SERIES',
                 value: invoiceResult.invoice?.series || process.env.OBLIO_INVOICE_SERIES || 'PRS'
             },
             {
-                name: 'INVOICE_URL',
+                key: 'INVOICE_URL',
                 value: invoiceResult.invoice?.url || ''
             },
             {
-                name: 'INVOICE_TOTAL',
+                key: 'INVOICE_TOTAL',
                 value: invoiceResult.invoice?.total?.toString() || '0'
             },
             {
-                name: 'INVOICE_CURRENCY',
+                key: 'INVOICE_CURRENCY',
                 value: invoiceResult.invoice?.currency || 'RON'
             },
             {
-                name: 'INVOICE_ISSUE_DATE',
+                key: 'INVOICE_ISSUE_DATE',
                 value: invoiceResult.invoice?.issueDate || new Date().toISOString().split('T')[0]
             },
             {
-                name: 'INVOICE_CREATED_AT',
+                key: 'INVOICE_CREATED_AT',
                 value: new Date().toISOString()
             }
         ];
@@ -348,14 +348,14 @@ export class UpdateOrderInvoiceAction {
         // Add client information if available
         if (invoiceResult.invoice?.clientName) {
             customAttributes.push({
-                name: 'INVOICE_CLIENT_NAME',
+                key: 'INVOICE_CLIENT_NAME',
                 value: invoiceResult.invoice.clientName
             });
         }
 
         if (invoiceResult.invoice?.clientCif) {
             customAttributes.push({
-                name: 'INVOICE_CLIENT_CIF',
+                key: 'INVOICE_CLIENT_CIF',
                 value: invoiceResult.invoice.clientCif
             });
         }

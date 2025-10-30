@@ -38,11 +38,7 @@ class InvoiceController {
         
         try {
             const order = req.body;
-            logger.info({ 
-                orderId: order.id, 
-                orderName: order.name,
-                customerEmail: order.customer?.email 
-            }, 'Processing Shopify order fulfillment webhook for invoice creation');
+            logger.info(`📥 Invoice webhook: Order ${order.name || order.id}`);
 
             // Create invoice using action
             const invoiceResult = await this.createInvoiceAction.execute({
@@ -51,11 +47,7 @@ class InvoiceController {
             });
 
             if (invoiceResult.success) {
-                logger.info({ 
-                    orderId: order.id,
-                    invoiceNumber: invoiceResult.invoice.number,
-                    customerEmail: order.customer?.email 
-                }, 'Invoice created successfully from webhook');
+                logger.info(`✅ Invoice ${invoiceResult.invoice.number} created for order ${order.name || order.id}`);
 
                 // Update order with invoice information
                 await this.updateOrderAction.execute({
@@ -65,11 +57,7 @@ class InvoiceController {
                 });
 
             } else {
-                logger.error({ 
-                    orderId: order.id,
-                    error: invoiceResult.error,
-                    details: invoiceResult.details 
-                }, 'Invoice creation failed from webhook');
+                logger.error(`❌ Invoice failed for order ${order.name || order.id}: ${invoiceResult.error}`);
 
                 // Update order with error information
                 await this.updateOrderAction.updateWithError({
@@ -80,12 +68,7 @@ class InvoiceController {
 
         } catch (error) {
             const orderId = req.body?.id || 'unknown';
-            
-            logger.error({ 
-                orderId,
-                error: error.message,
-                stack: error.stack 
-            }, 'Webhook processing failed');
+            logger.error(`❌ Webhook error for order ${orderId}: ${error.message}`);
 
             // Update order with system error
             try {
@@ -94,10 +77,7 @@ class InvoiceController {
                     error: { message: `System error: ${error.message}` }
                 });
             } catch (updateError) {
-                logger.error({ 
-                    orderId,
-                    updateError: updateError.message 
-                }, 'Failed to update order with system error');
+                logger.error(`⚠️ Failed to update order ${orderId} with error`);
             }
         }
     }
@@ -113,44 +93,18 @@ class InvoiceController {
         
         try {
             const order = req.body;
-            logger.info({ 
-                orderId: order.id, 
-                orderName: order.name 
-            }, 'Processing Shopify order update webhook for invoice retry');
 
             // Process retry using action
             const retryResult = await this.retryInvoiceAction.processOrderUpdateForRetry(order);
 
             if (retryResult.success && !retryResult.skipped) {
-                logger.info({ 
-                    orderId: order.id,
-                    invoiceNumber: retryResult.invoiceResult?.invoice?.number,
-                    retryAttempt: retryResult.retryAttempt 
-                }, 'Invoice retry successful from webhook');
-
-            } else if (retryResult.skipped) {
-                logger.debug({ 
-                    orderId: order.id,
-                    reason: retryResult.reason 
-                }, 'Invoice retry skipped');
-
-            } else {
-                logger.warn({ 
-                    orderId: order.id,
-                    error: retryResult.error,
-                    retryAttempt: retryResult.retryAttempt,
-                    finalFailure: retryResult.finalFailure 
-                }, 'Invoice retry failed from webhook');
+                logger.info(`🔄 Invoice retry success for order ${order.name || order.id}: ${retryResult.invoiceResult?.invoice?.number}`);
+            } else if (!retryResult.skipped && retryResult.finalFailure) {
+                logger.warn(`⚠️ Invoice retry final failure for order ${order.name || order.id}`);
             }
 
         } catch (error) {
-            const orderId = req.body?.id || 'unknown';
-            
-            logger.error({ 
-                orderId,
-                error: error.message,
-                stack: error.stack 
-            }, 'Webhook retry processing failed');
+            logger.error(`❌ Retry webhook error: ${error.message}`);
         }
     }
 
@@ -161,14 +115,11 @@ class InvoiceController {
      */
     async createFromExtension(req, res) {
         try {
-            logger.info({ body: req.body }, 'Received invoice creation request from extension');
-            
             // Extract and validate request data
             const requestData = this._extractRequestData(req.body);
             const validationError = this._validateRequestData(requestData);
             
             if (validationError) {
-                logger.warn({ requestData, validationError }, 'Invalid request data');
                 return res.status(400).json({
                     success: false,
                     error: validationError
@@ -184,12 +135,7 @@ class InvoiceController {
                 skipAnaf
             } = requestData;
 
-            logger.info({ 
-                orderId, 
-                orderName: orderData.name || orderData.order_number,
-                invoiceOptions,
-                customClient: !!customClient 
-            }, 'Processing invoice creation from extension');
+            logger.info(`📝 Manual invoice: Order ${orderData.name || orderData.order_number}`);
 
             // Step 1: Validate company if B2B and not skipped
             let validatedClient = customClient;
@@ -201,23 +147,12 @@ class InvoiceController {
                     });
 
                     if (companyValidation.success) {
-                        // Enrich client data with ANAF information
                         validatedClient = await this.validateCompanyAction.enrichClientData(
                             customClient, 
                             customClient.cif
                         );
-                        logger.info({ 
-                            orderId, 
-                            cif: customClient.cif,
-                            companyName: companyValidation.company.name 
-                        }, 'Company validated successfully with ANAF');
+                        logger.info(`✅ Company validated: ${companyValidation.company.name}`);
                     } else {
-                        logger.warn({ 
-                            orderId, 
-                            cif: customClient.cif,
-                            error: companyValidation.error 
-                        }, 'Company validation failed');
-
                         // Return validation error to user
                         if (companyValidation.errorType === 'NOT_FOUND' || 
                             companyValidation.errorType === 'INACTIVE') {
@@ -230,10 +165,7 @@ class InvoiceController {
                         }
                     }
                 } catch (validationError) {
-                    logger.warn({ 
-                        orderId, 
-                        error: validationError.message 
-                    }, 'Company validation failed, proceeding without ANAF enrichment');
+                    logger.warn(`⚠️ Company validation failed, continuing without ANAF enrichment`);
                 }
             }
 
@@ -246,11 +178,7 @@ class InvoiceController {
             });
 
             if (invoiceResult.success) {
-                logger.info({ 
-                    orderId, 
-                    invoiceNumber: invoiceResult.invoice.number,
-                    invoiceUrl: invoiceResult.invoice.url 
-                }, 'Invoice created successfully from extension');
+                logger.info(`✅ Manual invoice ${invoiceResult.invoice.number} created`);
 
                 // Step 3: Update order with invoice information
                 try {
@@ -261,13 +189,9 @@ class InvoiceController {
                         additionalTags: ['MANUAL_INVOICE']
                     });
                 } catch (updateError) {
-                    logger.warn({ 
-                        orderId, 
-                        error: updateError.message 
-                    }, 'Failed to update order, but invoice was created successfully');
+                    logger.warn(`⚠️ Order update failed, but invoice was created`);
                 }
 
-                // Return success response
                 return res.json({
                     success: true,
                     invoice: invoiceResult.invoice,
@@ -275,11 +199,7 @@ class InvoiceController {
                 });
 
             } else {
-                logger.error({ 
-                    orderId, 
-                    error: invoiceResult.error,
-                    details: invoiceResult.details 
-                }, 'Invoice creation failed from extension');
+                logger.error(`❌ Manual invoice failed: ${invoiceResult.error}`);
 
                 // Update order with error information
                 try {
@@ -288,10 +208,7 @@ class InvoiceController {
                         error: invoiceResult
                     });
                 } catch (updateError) {
-                    logger.warn({ 
-                        orderId, 
-                        error: updateError.message 
-                    }, 'Failed to update order with error information');
+                    // Silent fail
                 }
 
                 return res.status(400).json({
@@ -303,11 +220,7 @@ class InvoiceController {
             }
 
         } catch (error) {
-            logger.error({ 
-                orderId: req.body?.orderId,
-                error: error.message,
-                stack: error.stack
-            }, 'Failed to create invoice from extension');
+            logger.error(`❌ Extension invoice error: ${error.message}`);
 
             res.status(500).json({
                 success: false,
@@ -324,8 +237,6 @@ class InvoiceController {
      */
     async retryFromExtension(req, res) {
         try {
-            logger.info({ body: req.body }, 'Received invoice retry request from extension');
-            
             const { orderId, orderData, retryOptions = {} } = req.body;
 
             if (!orderId || !orderData) {
@@ -335,10 +246,7 @@ class InvoiceController {
                 });
             }
 
-            logger.info({ 
-                orderId, 
-                orderName: orderData.name || orderData.order_number 
-            }, 'Processing invoice retry from extension');
+            logger.info(`🔄 Manual retry: Order ${orderData.name || orderData.order_number}`);
 
             // Execute retry using action
             const retryResult = await this.retryInvoiceAction.execute({
@@ -349,11 +257,7 @@ class InvoiceController {
             });
 
             if (retryResult.success) {
-                logger.info({ 
-                    orderId, 
-                    invoiceNumber: retryResult.invoiceResult?.invoice?.number,
-                    retryAttempt: retryResult.retryAttempt 
-                }, 'Invoice retry successful from extension');
+                logger.info(`✅ Retry success: Invoice ${retryResult.invoiceResult?.invoice?.number}`);
 
                 return res.json({
                     success: true,
@@ -364,12 +268,7 @@ class InvoiceController {
                 });
 
             } else {
-                logger.warn({ 
-                    orderId, 
-                    error: retryResult.error,
-                    retryAttempt: retryResult.retryAttempt,
-                    finalFailure: retryResult.finalFailure 
-                }, 'Invoice retry failed from extension');
+                logger.warn(`⚠️ Retry failed: ${retryResult.error}`);
 
                 return res.status(400).json({
                     success: false,
@@ -382,11 +281,7 @@ class InvoiceController {
             }
 
         } catch (error) {
-            logger.error({ 
-                orderId: req.body?.orderId,
-                error: error.message,
-                stack: error.stack
-            }, 'Failed to retry invoice from extension');
+            logger.error(`❌ Manual retry error: ${error.message}`);
 
             res.status(500).json({
                 success: false,
@@ -412,8 +307,6 @@ class InvoiceController {
                 });
             }
 
-            logger.debug({ orderId }, 'Getting invoice status');
-
             const invoiceStatus = await this.updateOrderAction.checkInvoiceStatus(orderId);
 
             return res.json({
@@ -422,10 +315,7 @@ class InvoiceController {
             });
 
         } catch (error) {
-            logger.error({ 
-                orderId: req.params?.orderId,
-                error: error.message
-            }, 'Failed to get invoice status');
+            logger.error(`❌ Status check failed for order ${req.params?.orderId}: ${error.message}`);
 
             res.status(500).json({
                 success: false,
@@ -451,20 +341,21 @@ class InvoiceController {
                 });
             }
 
-            logger.debug({ cif }, 'Validating company with ANAF');
-
             const validation = await this.validateCompanyAction.execute({
                 cif,
                 includeInactiveCompanies
             });
 
+            if (validation.success) {
+                logger.info(`✅ ANAF validated: ${cif}`);
+            } else {
+                logger.warn(`⚠️ ANAF validation failed: ${cif}`);
+            }
+
             return res.json(validation);
 
         } catch (error) {
-            logger.error({ 
-                cif: req.body?.cif,
-                error: error.message
-            }, 'Failed to validate company');
+            logger.error(`❌ ANAF validation error for ${req.body?.cif}: ${error.message}`);
 
             res.status(500).json({
                 success: false,
