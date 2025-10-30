@@ -8,13 +8,13 @@ class InventorySyncJob {
     }
 
     /**
-     * Start the hourly inventory sync cron job
+     * Start the inventory sync cron job
      */
     start() {
-        // Run every hour at minute 0
-        const cronPattern = '0 * * * *';
+        // Run every 10 minutes
+        const cronPattern = '*/10 * * * *';
 
-        logger.info('🕐 Starting inventory sync cron job (hourly)');
+        logger.info('🕐 Starting inventory sync cron job (every 10 minutes)');
 
         cron.schedule(cronPattern, async () => {
             try {
