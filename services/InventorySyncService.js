@@ -176,11 +176,11 @@ export default class InventorySyncService {
         const input = {
             reason: 'correction',
             name: 'on_hand',
+            ignoreCompareQuantity: true,
             quantities: [{
                 inventoryItemId,
                 locationId,
-                quantity: newQuantity,
-                compareQuantity: variant.inventoryQuantity
+                quantity: newQuantity
             }]
         };
 
