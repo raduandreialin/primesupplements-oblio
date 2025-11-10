@@ -42,9 +42,9 @@ export class ValidateCompanyAction {
             const cleanCif = cifValidation.cleanCif;
 
             // Query ANAF for company information
-            const anafData = await this.anafService.getCompanyInfo(cleanCif);
+            const anafData = await this.anafService.verifyCompany(cleanCif);
 
-            if (!anafData || !anafData.found) {
+            if (!anafData) {
                 logger.warn({ cif: cleanCif }, 'Company not found in ANAF database');
                 return {
                     success: false,
@@ -263,8 +263,12 @@ export class ValidateCompanyAction {
      * @private
      */
     _isCompanyActive(anafData) {
-        // Company is active if it has active VAT status
-        return anafData.scpTVA === true || anafData.stare === 'ACTIVA';
+        // Check VAT status from the ANAF response structure
+        const vatInfo = anafData.inregistrare_scop_Tva || {};
+        const inactive = anafData.stare_inactiv || {};
+
+        // Company is active if it has active VAT status and is not inactive
+        return vatInfo.scpTVA === true && inactive.statusInactivi !== true;
     }
 
     /**
@@ -272,58 +276,45 @@ export class ValidateCompanyAction {
      * @private
      */
     _extractCompanyInfo(anafData, cif) {
-        const address = this._formatCompanyAddress(anafData.adresa);
-        
-        return {
-            name: anafData.denumire || 'Unknown Company',
-            cif: cif,
-            registrationNumber: anafData.nrRegCom || '',
-            address: address.formatted,
-            addressComponents: address.components,
-            isActive: this._isCompanyActive(anafData),
-            vatActive: anafData.scpTVA === true,
-            status: anafData.stare || 'UNKNOWN',
-            registrationDate: anafData.dataInregistrare || null,
-            lastUpdate: anafData.dataActualizare || null,
-            activityCodes: anafData.coduri_caen || [],
-            phone: anafData.telefon || '',
-            email: anafData.email || ''
-        };
-    }
-
-    /**
-     * Format company address from ANAF data
-     * @private
-     */
-    _formatCompanyAddress(anafAddress) {
-        if (!anafAddress) {
-            return {
-                formatted: '',
-                components: {}
-            };
-        }
-
-        const components = {
-            street: anafAddress.strada || '',
-            number: anafAddress.numar || '',
-            locality: anafAddress.localitate || '',
-            county: anafAddress.judet || '',
-            postalCode: anafAddress.codPostal || '',
-            country: 'România'
-        };
+        const general = anafData.date_generale || {};
+        const vatInfo = anafData.inregistrare_scop_Tva || {};
+        const inactive = anafData.stare_inactiv || {};
+        const fiscalAddress = anafData.adresa_domiciliu_fiscal || {};
 
         // Build formatted address
         const addressParts = [
-            components.street,
-            components.number,
-            components.locality,
-            components.county,
-            components.postalCode
+            fiscalAddress.ddenumire_Strada,
+            fiscalAddress.dnumar_Strada,
+            fiscalAddress.ddenumire_Localitate,
+            fiscalAddress.ddenumire_Judet,
+            fiscalAddress.dcod_Postal
         ].filter(Boolean);
 
+        const formattedAddress = addressParts.length > 0
+            ? addressParts.join(', ')
+            : general.adresa || '';
+
         return {
-            formatted: addressParts.join(', '),
-            components
+            name: general.denumire || 'Unknown Company',
+            cif: cif,
+            registrationNumber: general.nrRegCom || '',
+            address: formattedAddress,
+            addressComponents: {
+                street: fiscalAddress.ddenumire_Strada || '',
+                number: fiscalAddress.dnumar_Strada || '',
+                locality: fiscalAddress.ddenumire_Localitate || '',
+                county: fiscalAddress.ddenumire_Judet || '',
+                postalCode: fiscalAddress.dcod_Postal || general.codPostal || '',
+                country: 'România'
+            },
+            isActive: this._isCompanyActive(anafData),
+            vatActive: vatInfo.scpTVA === true,
+            status: inactive.statusInactivi === true ? 'INACTIVE' : 'ACTIVE',
+            registrationDate: general.data_inregistrare || null,
+            lastUpdate: null,
+            activityCodes: general.cod_CAEN ? [general.cod_CAEN] : [],
+            phone: general.telefon || '',
+            email: ''
         };
     }
 

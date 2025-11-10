@@ -15,6 +15,7 @@
     "test:oblio-products": "node _tests/oblio-products-query-test.js",
     "test:shopify-products": "node _tests/shopify-products-test.js",
     "test:inventory-sync": "node _tests/inventory-sync-test.js",
+    "test:oblio-sku": "node scripts/test-oblio-product.js",
     "sync:preview": "node scripts/sync-inventory.js --dry-run",
     "sync:inventory": "node scripts/sync-inventory.js"
   },
