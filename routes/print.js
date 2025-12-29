@@ -140,57 +140,25 @@ router.get('/awb-document/:awbNumber', async (req, res) => {
         // Remove X-Frame-Options as it conflicts with CSP frame-ancestors
         res.removeHeader('X-Frame-Options');
 
-        // If raw=1, serve the PDF directly (for direct downloads/new tab)
-        if (raw === '1') {
-            let pdfBuffer;
-            try {
-                pdfBuffer = Buffer.from(awbDocument, 'base64');
-            } catch (decodeError) {
-                logger.error({ awbNumber, error: decodeError.message }, 'Failed to decode Base64 AWB document');
-                return res.status(500).json({
-                    success: false,
-                    error: 'Failed to decode AWB document'
-                });
-            }
-
-            res.setHeader('Content-Type', 'application/pdf');
-            res.setHeader('Content-Disposition', `inline; filename="AWB-${awbNumber}.pdf"`);
-            res.setHeader('Content-Length', pdfBuffer.length);
-
-            logger.info({ awbNumber, pdfSize: pdfBuffer.length }, 'AWB document served as raw PDF');
-            return res.send(pdfBuffer);
+        // Serve the PDF directly
+        // Shopify AdminPrintAction docs say PDFs are supported
+        let pdfBuffer;
+        try {
+            pdfBuffer = Buffer.from(awbDocument, 'base64');
+        } catch (decodeError) {
+            logger.error({ awbNumber, error: decodeError.message }, 'Failed to decode Base64 AWB document');
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to decode AWB document'
+            });
         }
 
-        // Default: Serve HTML with embedded PDF as data URL
-        // Shopify's print iframe is sandboxed but supports embedded objects
-        const pdfDataUrl = `data:application/pdf;base64,${awbDocument}`;
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `inline; filename="AWB-${awbNumber}.pdf"`);
+        res.setHeader('Content-Length', pdfBuffer.length);
 
-        const htmlContent = `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AWB ${awbNumber}</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { width: 100%; height: 100%; overflow: hidden; }
-        .pdf-container { width: 100%; height: 100%; }
-        embed, object, iframe { width: 100%; height: 100%; border: none; }
-        @media print {
-            html, body { height: auto; overflow: visible; }
-        }
-    </style>
-</head>
-<body>
-    <div class="pdf-container">
-        <embed src="${pdfDataUrl}" type="application/pdf" />
-    </div>
-</body>
-</html>`;
-
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        logger.info({ awbNumber }, 'AWB document served as HTML with embedded PDF');
-        res.send(htmlContent);
+        logger.info({ awbNumber, pdfSize: pdfBuffer.length }, 'AWB document served as PDF');
+        res.send(pdfBuffer);
 
     } catch (error) {
         logger.error({ awbNumber: req.params.awbNumber, error: error.message }, 'Failed to fetch AWB document');
