@@ -3,8 +3,6 @@ import ShopifyService from '../services/ShopifyService.js';
 import CargusService from '../services/CargusService.js';
 import config from '../config/AppConfig.js';
 import { logger } from '../utils/index.js';
-import { createCanvas } from 'canvas';
-import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 const router = express.Router();
 
@@ -163,51 +161,11 @@ router.get('/awb-document/:awbNumber', async (req, res) => {
             return res.send(pdfBuffer);
         }
 
-        // Default: Convert PDF to images server-side and serve static HTML
-        // Shopify's print iframe is sandboxed and doesn't allow JavaScript
-        try {
-            const pdfBuffer = Buffer.from(awbDocument, 'base64');
-            const pdfData = new Uint8Array(pdfBuffer);
+        // Default: Serve HTML with embedded PDF as data URL
+        // Shopify's print iframe is sandboxed but supports embedded objects
+        const pdfDataUrl = `data:application/pdf;base64,${awbDocument}`;
 
-            // Load PDF using pdf.js
-            const loadingTask = pdfjsLib.getDocument({ data: pdfData });
-            const pdf = await loadingTask.promise;
-
-            const pageImages = [];
-            const scale = 2.0; // Higher scale for better print quality
-
-            // Render each page to an image
-            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-                const page = await pdf.getPage(pageNum);
-                const viewport = page.getViewport({ scale });
-
-                // Create canvas using node-canvas
-                const canvas = createCanvas(viewport.width, viewport.height);
-                const context = canvas.getContext('2d');
-
-                // Render the page
-                await page.render({
-                    canvasContext: context,
-                    viewport: viewport
-                }).promise;
-
-                // Convert to base64 PNG
-                const imageDataUrl = canvas.toDataURL('image/png');
-                pageImages.push({
-                    dataUrl: imageDataUrl,
-                    width: viewport.width,
-                    height: viewport.height
-                });
-            }
-
-            // Generate static HTML with embedded images (no JavaScript)
-            const imagesHtml = pageImages.map((img, index) =>
-                `<div class="page">
-                    <img src="${img.dataUrl}" alt="AWB Page ${index + 1}" style="max-width: 100%; height: auto;" />
-                </div>`
-            ).join('\n');
-
-            const htmlContent = `<!DOCTYPE html>
+        const htmlContent = `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -215,36 +173,24 @@ router.get('/awb-document/:awbNumber', async (req, res) => {
     <title>AWB ${awbNumber}</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { width: 100%; min-height: 100%; background: #f5f5f5; }
-        .container { display: flex; flex-direction: column; align-items: center; padding: 20px; gap: 20px; }
-        .page { background: white; box-shadow: 0 2px 10px rgba(0,0,0,0.2); display: flex; justify-content: center; }
-        .page img { display: block; }
+        html, body { width: 100%; height: 100%; overflow: hidden; }
+        .pdf-container { width: 100%; height: 100%; }
+        embed, object, iframe { width: 100%; height: 100%; border: none; }
         @media print {
-            html, body { background: white; }
-            .container { padding: 0; gap: 0; }
-            .page { box-shadow: none; page-break-after: always; }
-            .page:last-child { page-break-after: auto; }
+            html, body { height: auto; overflow: visible; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        ${imagesHtml}
+    <div class="pdf-container">
+        <embed src="${pdfDataUrl}" type="application/pdf" />
     </div>
 </body>
 </html>`;
 
-            res.setHeader('Content-Type', 'text/html; charset=utf-8');
-            logger.info({ awbNumber, pageCount: pageImages.length }, 'AWB document served as HTML with rendered images');
-            res.send(htmlContent);
-
-        } catch (renderError) {
-            logger.error({ awbNumber, error: renderError.message }, 'Failed to render PDF to images');
-            return res.status(500).json({
-                success: false,
-                error: 'Failed to render AWB document'
-            });
-        }
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        logger.info({ awbNumber }, 'AWB document served as HTML with embedded PDF');
+        res.send(htmlContent);
 
     } catch (error) {
         logger.error({ awbNumber: req.params.awbNumber, error: error.message }, 'Failed to fetch AWB document');
