@@ -94,6 +94,13 @@ router.get('/orders/:orderId/awb-url', async (req, res) => {
  * Proxy endpoint to serve AWB documents from Cargus API
  * GET /api/awb-document/:awbNumber
  */
+router.options('/awb-document/:awbNumber', (req, res) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.sendStatus(200);
+});
+
 router.get('/awb-document/:awbNumber', async (req, res) => {
     try {
         const { awbNumber } = req.params;
@@ -133,6 +140,23 @@ router.get('/awb-document/:awbNumber', async (req, res) => {
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `inline; filename="AWB-${awbNumber}.pdf"`);
         res.setHeader('Content-Length', pdfBuffer.length);
+        
+        // CORS headers - allow from any origin for Shopify admin
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.setHeader('Access-Control-Expose-Headers', 'Content-Type, Content-Disposition, Content-Length');
+        
+        // Cache control
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+        
+        // CSP headers to allow embedding in Shopify admin iframes
+        res.setHeader('Content-Security-Policy', "frame-ancestors 'self' https://*.shopify.com https://*.admin.shopify.com https://*.admin.shopify.io https://extensions.shopifycdn.com https://*.extensions.shopifycdn.com");
+        
+        // Remove X-Frame-Options as it conflicts with CSP frame-ancestors
+        res.removeHeader('X-Frame-Options');
         
         logger.info({ awbNumber, pdfSize: pdfBuffer.length }, 'AWB document served successfully');
         
