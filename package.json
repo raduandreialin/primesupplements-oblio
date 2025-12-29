@@ -32,11 +32,13 @@
     "@shopify/ui-extensions": "2025.4.0",
     "@shopify/ui-extensions-react": "2025.4.0",
     "axios": "^1.6.0",
+    "canvas": "^3.2.0",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "node-cron": "^4.2.1",
+    "pdfjs-dist": "^5.4.530",
     "react": "^18.3.1",
     "react-reconciler": "0.29.0",
     "shopify-api-node": "^3.15.0"

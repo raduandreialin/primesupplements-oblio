@@ -3,6 +3,8 @@ import ShopifyService from '../services/ShopifyService.js';
 import CargusService from '../services/CargusService.js';
 import config from '../config/AppConfig.js';
 import { logger } from '../utils/index.js';
+import { createCanvas } from 'canvas';
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 
 const router = express.Router();
 
@@ -161,77 +163,88 @@ router.get('/awb-document/:awbNumber', async (req, res) => {
             return res.send(pdfBuffer);
         }
 
-        // Default: Serve an HTML page with embedded PDF using PDF.js
-        // This avoids Chrome's PDF viewer extension CSP issues in iframes
-        const htmlContent = `
-<!DOCTYPE html>
+        // Default: Convert PDF to images server-side and serve static HTML
+        // Shopify's print iframe is sandboxed and doesn't allow JavaScript
+        try {
+            const pdfBuffer = Buffer.from(awbDocument, 'base64');
+            const pdfData = new Uint8Array(pdfBuffer);
+
+            // Load PDF using pdf.js
+            const loadingTask = pdfjsLib.getDocument({ data: pdfData });
+            const pdf = await loadingTask.promise;
+
+            const pageImages = [];
+            const scale = 2.0; // Higher scale for better print quality
+
+            // Render each page to an image
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                const page = await pdf.getPage(pageNum);
+                const viewport = page.getViewport({ scale });
+
+                // Create canvas using node-canvas
+                const canvas = createCanvas(viewport.width, viewport.height);
+                const context = canvas.getContext('2d');
+
+                // Render the page
+                await page.render({
+                    canvasContext: context,
+                    viewport: viewport
+                }).promise;
+
+                // Convert to base64 PNG
+                const imageDataUrl = canvas.toDataURL('image/png');
+                pageImages.push({
+                    dataUrl: imageDataUrl,
+                    width: viewport.width,
+                    height: viewport.height
+                });
+            }
+
+            // Generate static HTML with embedded images (no JavaScript)
+            const imagesHtml = pageImages.map((img, index) =>
+                `<div class="page">
+                    <img src="${img.dataUrl}" alt="AWB Page ${index + 1}" style="max-width: 100%; height: auto;" />
+                </div>`
+            ).join('\n');
+
+            const htmlContent = `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AWB ${awbNumber}</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { width: 100%; height: 100%; overflow: hidden; background: #525659; }
-        #pdf-container { width: 100%; height: 100%; overflow: auto; display: flex; flex-direction: column; align-items: center; padding: 10px; gap: 10px; }
-        .pdf-page { background: white; box-shadow: 0 2px 10px rgba(0,0,0,0.3); }
-        #loading { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); color: white; font-family: Arial, sans-serif; font-size: 18px; }
-        #error { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #ff6b6b; font-family: Arial, sans-serif; font-size: 16px; text-align: center; padding: 20px; }
+        html, body { width: 100%; min-height: 100%; background: #f5f5f5; }
+        .container { display: flex; flex-direction: column; align-items: center; padding: 20px; gap: 20px; }
+        .page { background: white; box-shadow: 0 2px 10px rgba(0,0,0,0.2); display: flex; justify-content: center; }
+        .page img { display: block; }
         @media print {
             html, body { background: white; }
-            #pdf-container { padding: 0; gap: 0; }
-            .pdf-page { box-shadow: none; page-break-after: always; }
+            .container { padding: 0; gap: 0; }
+            .page { box-shadow: none; page-break-after: always; }
+            .page:last-child { page-break-after: auto; }
         }
     </style>
 </head>
 <body>
-    <div id="loading">Loading AWB document...</div>
-    <div id="pdf-container"></div>
-    <script>
-        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-
-        const pdfData = atob('${awbDocument}');
-        const pdfArray = new Uint8Array(pdfData.length);
-        for (let i = 0; i < pdfData.length; i++) {
-            pdfArray[i] = pdfData.charCodeAt(i);
-        }
-
-        const loadingTask = pdfjsLib.getDocument({ data: pdfArray });
-        loadingTask.promise.then(async function(pdf) {
-            document.getElementById('loading').style.display = 'none';
-            const container = document.getElementById('pdf-container');
-
-            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
-                const page = await pdf.getPage(pageNum);
-                const scale = 1.5;
-                const viewport = page.getViewport({ scale: scale });
-
-                const canvas = document.createElement('canvas');
-                canvas.className = 'pdf-page';
-                const context = canvas.getContext('2d');
-                canvas.height = viewport.height;
-                canvas.width = viewport.width;
-
-                container.appendChild(canvas);
-
-                await page.render({
-                    canvasContext: context,
-                    viewport: viewport
-                }).promise;
-            }
-        }).catch(function(error) {
-            document.getElementById('loading').style.display = 'none';
-            document.getElementById('pdf-container').innerHTML = '<div id="error">Failed to load PDF document.<br>Error: ' + error.message + '</div>';
-            console.error('PDF loading error:', error);
-        });
-    </script>
+    <div class="container">
+        ${imagesHtml}
+    </div>
 </body>
 </html>`;
 
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        logger.info({ awbNumber }, 'AWB document served as HTML with PDF.js');
-        res.send(htmlContent);
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            logger.info({ awbNumber, pageCount: pageImages.length }, 'AWB document served as HTML with rendered images');
+            res.send(htmlContent);
+
+        } catch (renderError) {
+            logger.error({ awbNumber, error: renderError.message }, 'Failed to render PDF to images');
+            return res.status(500).json({
+                success: false,
+                error: 'Failed to render AWB document'
+            });
+        }
 
     } catch (error) {
         logger.error({ awbNumber: req.params.awbNumber, error: error.message }, 'Failed to fetch AWB document');
