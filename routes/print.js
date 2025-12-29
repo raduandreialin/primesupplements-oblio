@@ -108,10 +108,10 @@ router.get('/awb-document/:awbNumber', async (req, res) => {
 
         logger.info({ awbNumber, format, printOnce, raw }, 'Fetching AWB document from Cargus');
 
-        // Fetch AWB document from Cargus API
+        // Fetch AWB document from Cargus API as HTML (works in Shopify's sandboxed iframe)
         const awbDocument = await cargusService.printAwbDocuments(
             [awbNumber],
-            'PDF',
+            'HTML',
             parseInt(format),
             parseInt(printOnce)
         );
@@ -140,11 +140,11 @@ router.get('/awb-document/:awbNumber', async (req, res) => {
         // Remove X-Frame-Options as it conflicts with CSP frame-ancestors
         res.removeHeader('X-Frame-Options');
 
-        // Serve the PDF directly
-        // Shopify AdminPrintAction docs say PDFs are supported
-        let pdfBuffer;
+        // Serve the HTML document directly (works in Shopify's sandboxed iframe)
+        let htmlContent;
         try {
-            pdfBuffer = Buffer.from(awbDocument, 'base64');
+            // Cargus returns Base64 encoded HTML
+            htmlContent = Buffer.from(awbDocument, 'base64').toString('utf-8');
         } catch (decodeError) {
             logger.error({ awbNumber, error: decodeError.message }, 'Failed to decode Base64 AWB document');
             return res.status(500).json({
@@ -153,12 +153,10 @@ router.get('/awb-document/:awbNumber', async (req, res) => {
             });
         }
 
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `inline; filename="AWB-${awbNumber}.pdf"`);
-        res.setHeader('Content-Length', pdfBuffer.length);
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
 
-        logger.info({ awbNumber, pdfSize: pdfBuffer.length }, 'AWB document served as PDF');
-        res.send(pdfBuffer);
+        logger.info({ awbNumber, htmlSize: htmlContent.length }, 'AWB document served as HTML');
+        res.send(htmlContent);
 
     } catch (error) {
         logger.error({ awbNumber: req.params.awbNumber, error: error.message }, 'Failed to fetch AWB document');
